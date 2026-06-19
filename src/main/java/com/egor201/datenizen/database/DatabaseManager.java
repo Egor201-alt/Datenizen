@@ -180,7 +180,12 @@ public class DatabaseManager {
     public boolean startTransaction(String txId, String dbId) throws SQLException {
         if (activeTransactions.containsKey(txId)) return false;
         Connection conn = getConnection(dbId);
-        conn.setAutoCommit(false);
+        try {
+            conn.setAutoCommit(false);
+        } catch (SQLException e) {
+            try { conn.close(); } catch (SQLException ignored) {}
+            throw e;
+        }
         activeTransactions.put(txId, conn);
         transactionStartTimes.put(txId, System.currentTimeMillis());
         transactionDbIds.put(txId, dbId);
@@ -192,9 +197,12 @@ public class DatabaseManager {
         transactionStartTimes.remove(txId);
         transactionDbIds.remove(txId);
         if (conn != null) {
-            conn.commit();
-            conn.setAutoCommit(true);
-            conn.close();
+            try {
+                conn.commit();
+                conn.setAutoCommit(true);
+            } finally {
+                conn.close();
+            }
             return true;
         }
         return false;
@@ -205,9 +213,12 @@ public class DatabaseManager {
         transactionStartTimes.remove(txId);
         transactionDbIds.remove(txId);
         if (conn != null) {
-            conn.rollback();
-            conn.setAutoCommit(true);
-            conn.close();
+            try {
+                conn.rollback();
+                conn.setAutoCommit(true);
+            } finally {
+                conn.close();
+            }
             return true;
         }
         return false;
@@ -238,8 +249,9 @@ public class DatabaseManager {
 
     public void closeAllConnections() {
         for (Connection conn : activeTransactions.values()) {
-            try { conn.rollback(); conn.setAutoCommit(true); conn.close(); }
-            catch (SQLException ignored) {}
+            try { conn.rollback(); }         catch (SQLException ignored) {}
+            try { conn.setAutoCommit(true); } catch (SQLException ignored) {}
+            try { conn.close(); }            catch (SQLException ignored) {}
         }
         activeTransactions.clear();
         transactionStartTimes.clear();

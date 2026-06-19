@@ -20,5 +20,5 @@ public class DbTransactionExpiredEvent extends ScriptEvent {
 
     public DbTransactionExpiredEvent() { instance = this; registerCouldMatcher("db transaction expired"); }
     @Override public ObjectTag getContext(String name) { return name.equals("tx") ? tx : (name.equals("id") ? id : super.getContext(name)); }
-    public void fireFor(String txId, String dbId) { this.tx = new ElementTag(txId); this.id = new ElementTag(dbId); fire(); }
+    public void fireFor(String txId, String dbId) { this.tx = new ElementTag(txId); this.id = new ElementTag(dbId != null ? dbId : ""); fire(); }
 }

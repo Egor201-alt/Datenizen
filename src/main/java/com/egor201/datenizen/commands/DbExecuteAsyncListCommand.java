@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbErrorEvent;
+import com.egor201.datenizen.events.DbExecutedEvent;
 import org.bukkit.Bukkit;
 
 import java.sql.Connection;
@@ -70,6 +71,9 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
                 }
 
                 conn.commit();
+                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                    DbExecutedEvent.instance.fireFor(id, null, 0)
+                );
             } catch (Exception e) {
                 e.printStackTrace();
                 if (conn != null) {
