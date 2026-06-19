@@ -4,10 +4,13 @@ import com.denizenscript.denizencore.objects.core.ListTag;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbConnectionLeakedEvent;
 import com.egor201.datenizen.events.DbDisconnectedEvent;
+import com.egor201.datenizen.events.DbNotifyEvent;
 import com.egor201.datenizen.events.DbTransactionExpiredEvent;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -27,6 +30,9 @@ public class DatabaseManager {
     private final Map<String, String>            namedQueries          = new ConcurrentHashMap<>();
     // Object[] = { ListTag result, Long expiresAtMs }
     private final Map<String, Object[]>          queryCache            = new ConcurrentHashMap<>();
+    // key: "id:channel"
+    private final Map<String, Connection>        listenConnections     = new ConcurrentHashMap<>();
+    private final Map<String, Integer>           listenTaskIds         = new ConcurrentHashMap<>();
 
     private static final Map<String, String> DRIVER_ALIASES = Map.of(
         "sqlite",     "org.sqlite.JDBC",
@@ -276,7 +282,62 @@ public class DatabaseManager {
         }
     }
 
+    public void startListen(String id, String channel) throws Exception {
+        String key = id + ":" + channel;
+        if (listenConnections.containsKey(key)) return;
+
+        Connection conn = getConnection(id);
+        try (Statement st = conn.createStatement()) {
+            st.execute("LISTEN " + channel);
+        }
+        listenConnections.put(key, conn);
+
+        PGConnection pgConn = conn.unwrap(PGConnection.class);
+
+        int taskId = Bukkit.getScheduler().runTaskTimerAsynchronously(Datenizen.getInstance(), () -> {
+            try (Statement st = conn.createStatement()) {
+                st.execute("SELECT 1");
+            } catch (Exception ignored) {}
+            try {
+                PGNotification[] notifications = pgConn.getNotifications(0);
+                if (notifications == null) return;
+                for (PGNotification n : notifications) {
+                    String payload = n.getParameter();
+                    Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                        DbNotifyEvent.instance.fireFor(id, n.getName(), payload != null ? payload : "")
+                    );
+                }
+            } catch (Exception ignored) {}
+        }, 20L, 20L).getTaskId();
+
+        listenTaskIds.put(key, taskId);
+    }
+
+    public void stopListen(String id, String channel) throws Exception {
+        String key = id + ":" + channel;
+        Integer taskId = listenTaskIds.remove(key);
+        if (taskId != null) Bukkit.getScheduler().cancelTask(taskId);
+        Connection conn = listenConnections.remove(key);
+        if (conn != null) {
+            try (Statement st = conn.createStatement()) { st.execute("UNLISTEN " + channel); } catch (Exception ignored) {}
+            try { conn.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    public void stopAllListeners() {
+        for (Map.Entry<String, Integer> e : listenTaskIds.entrySet()) {
+            Bukkit.getScheduler().cancelTask(e.getValue());
+        }
+        listenTaskIds.clear();
+        for (Connection conn : listenConnections.values()) {
+            try { conn.close(); } catch (Exception ignored) {}
+        }
+        listenConnections.clear();
+    }
+
     public void closeAllConnections() {
+        stopAllListeners();
+
         for (Connection conn : activeTransactions.values()) {
             try { conn.rollback(); }         catch (SQLException ignored) {}
             try { conn.setAutoCommit(true); } catch (SQLException ignored) {}
