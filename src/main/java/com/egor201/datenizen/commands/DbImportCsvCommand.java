@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbCsvImportedEvent;
 import com.egor201.datenizen.events.DbErrorEvent;
+import com.egor201.datenizen.util.SqlUtils;
 import org.bukkit.Bukkit;
 
 import java.io.BufferedReader;
@@ -16,7 +17,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -65,39 +65,6 @@ public class DbImportCsvCommand extends AbstractCommand {
         }
     }
 
-    private List<String> parseCsvLine(String line) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (inQuotes) {
-                if (c == '"') {
-                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                        current.append('"');
-                        i++;
-                    } else {
-                        inQuotes = false;
-                    }
-                } else {
-                    current.append(c);
-                }
-            } else {
-                if (c == '"') {
-                    inQuotes = true;
-                } else if (c == ',') {
-                    fields.add(current.toString().trim());
-                    current.setLength(0);
-                } else {
-                    current.append(c);
-                }
-            }
-        }
-        fields.add(current.toString().trim());
-        return fields;
-    }
-
     @Override
     public void execute(ScriptEntry scriptEntry) {
         String id    = scriptEntry.getElement("id").asString();
@@ -126,7 +93,7 @@ public class DbImportCsvCommand extends AbstractCommand {
                     String headerLine = reader.readLine();
                     if (headerLine == null) return;
 
-                    List<String> headers = parseCsvLine(headerLine);
+                    List<String> headers = SqlUtils.parseCsvLine(headerLine);
                     int columnCount = headers.size();
 
                     StringBuilder placeholders = new StringBuilder();
@@ -142,7 +109,7 @@ public class DbImportCsvCommand extends AbstractCommand {
                         String line;
                         while ((line = reader.readLine()) != null) {
                             if (line.isBlank()) continue;
-                            List<String> values = parseCsvLine(line);
+                            List<String> values = SqlUtils.parseCsvLine(line);
                             int limit = Math.min(values.size(), columnCount);
                             for (int i = 0; i < limit; i++) {
                                 ps.setObject(i + 1, values.get(i));

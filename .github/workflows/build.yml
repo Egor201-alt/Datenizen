@@ -24,10 +24,21 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Run tests
+      run: ./gradlew test
+
+    - name: Upload test report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report
+        path: build/reports/tests/test/
+        if-no-files-found: ignore
+
     - name: Build with Gradle
       run: ./gradlew build
 
-    - name: Upload Artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: Datenizen-Build
