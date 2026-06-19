@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DbExecuteScriptCommand extends AbstractCommand {
 
@@ -26,6 +28,8 @@ public class DbExecuteScriptCommand extends AbstractCommand {
     //
     // @Description
     // Reads a .sql file and executes each statement separated by semicolons asynchronously.
+    // Handles single-quoted strings, double-quoted identifiers, and both -- and /* */ comments
+    // so semicolons inside literals or comments do not split statements incorrectly.
     // All statements run inside a transaction and are rolled back on failure.
     // -->
 
@@ -51,9 +55,72 @@ public class DbExecuteScriptCommand extends AbstractCommand {
         }
     }
 
+    // Splits SQL content by ';' while ignoring semicolons inside string literals and comments.
+    private List<String> splitStatements(String content) {
+        List<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        boolean inLineComment = false;
+        boolean inBlockComment = false;
+
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            char next = (i + 1 < content.length()) ? content.charAt(i + 1) : 0;
+
+            if (inLineComment) {
+                if (c == '\n') inLineComment = false;
+                current.append(c);
+                continue;
+            }
+
+            if (inBlockComment) {
+                current.append(c);
+                if (c == '*' && next == '/') {
+                    current.append(next);
+                    i++;
+                    inBlockComment = false;
+                }
+                continue;
+            }
+
+            if (!inSingleQuote && !inDoubleQuote) {
+                if (c == '-' && next == '-') {
+                    inLineComment = true;
+                    current.append(c);
+                    continue;
+                }
+                if (c == '/' && next == '*') {
+                    inBlockComment = true;
+                    current.append(c);
+                    continue;
+                }
+                if (c == ';') {
+                    String stmt = current.toString().trim();
+                    if (!stmt.isEmpty()) statements.add(stmt);
+                    current.setLength(0);
+                    continue;
+                }
+            }
+
+            if (c == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+            } else if (c == '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+            }
+
+            current.append(c);
+        }
+
+        String remaining = current.toString().trim();
+        if (!remaining.isEmpty()) statements.add(remaining);
+
+        return statements;
+    }
+
     @Override
     public void execute(ScriptEntry se) {
-        String id = se.getElement("id").asString();
+        String id   = se.getElement("id").asString();
         String path = se.getElement("path").asString();
 
         File f = new File(path);
@@ -63,15 +130,13 @@ public class DbExecuteScriptCommand extends AbstractCommand {
             Connection conn = null;
             try {
                 String content = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
-                String[] queries = content.split(";");
+                List<String> queries = splitStatements(content);
 
                 conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
                 conn.setAutoCommit(false);
 
                 for (String q : queries) {
-                    String trimmed = q.trim();
-                    if (trimmed.isEmpty()) continue;
-                    try (PreparedStatement ps = conn.prepareStatement(trimmed)) {
+                    try (PreparedStatement ps = conn.prepareStatement(q)) {
                         ps.executeUpdate();
                     }
                 }
@@ -87,10 +152,7 @@ public class DbExecuteScriptCommand extends AbstractCommand {
                 );
             } finally {
                 if (conn != null) {
-                    try {
-                        conn.setAutoCommit(true);
-                        conn.close();
-                    } catch (Exception ignored) {}
+                    try { conn.setAutoCommit(true); conn.close(); } catch (Exception ignored) {}
                 }
             }
         });

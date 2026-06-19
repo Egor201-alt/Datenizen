@@ -59,8 +59,10 @@ public class DbSetPoolSizeCommand extends AbstractCommand {
         }
 
         HikariDataSource ds = Datenizen.getInstance().getDatabaseManager().getDataSource(id);
-        if (ds != null) {
-            ds.setMaximumPoolSize(size);
+        if (ds == null) {
+            DbErrorEvent.instance.fireFor(id, "Database ID not found: " + id, null, "db_set_pool_size");
+            return;
         }
+        ds.setMaximumPoolSize(size);
     }
 }

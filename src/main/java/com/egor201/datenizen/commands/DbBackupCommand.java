@@ -5,6 +5,7 @@ import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
+import com.egor201.datenizen.events.DbBackedUpEvent;
 import com.egor201.datenizen.events.DbErrorEvent;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit;
@@ -72,6 +73,9 @@ public class DbBackupCommand extends AbstractCommand {
                 }
 
                 Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                    DbBackedUpEvent.instance.fireFor(id, path)
+                );
             } catch (Exception e) {
                 e.printStackTrace();
                 Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->

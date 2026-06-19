@@ -57,6 +57,7 @@ public final class Datenizen extends JavaPlugin {
         ScriptEvent.registerScriptEvent(new DbConnectionLeakedEvent());
         ScriptEvent.registerScriptEvent(new DbCsvImportedEvent());
         ScriptEvent.registerScriptEvent(new DbCsvExportedEvent());
+        ScriptEvent.registerScriptEvent(new DbBackedUpEvent());
 
         DatenizenTags.register();
 

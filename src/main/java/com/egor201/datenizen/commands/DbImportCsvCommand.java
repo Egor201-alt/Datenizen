@@ -18,6 +18,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public class DbImportCsvCommand extends AbstractCommand {
 
@@ -30,9 +31,15 @@ public class DbImportCsvCommand extends AbstractCommand {
     // @Group Datenizen
     //
     // @Description
-    // Reads a CSV file asynchronously and inserts rows into the specified table.
+    // Reads a CSV file asynchronously and inserts rows into the specified table using a transaction.
+    // If any row fails the entire import is rolled back.
+    // The first line of the file is treated as the header and skipped.
     // Supports quoted fields containing commas and escaped quotes.
+    // Table name must be alphanumeric/underscores only.
+    // If a CSV row has fewer columns than the header, missing values are inserted as NULL.
     // -->
+
+    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
 
     public DbImportCsvCommand() {
         setName("db_import_csv");
@@ -93,61 +100,83 @@ public class DbImportCsvCommand extends AbstractCommand {
 
     @Override
     public void execute(ScriptEntry scriptEntry) {
-        String id = scriptEntry.getElement("id").asString();
+        String id    = scriptEntry.getElement("id").asString();
         String table = scriptEntry.getElement("table").asString();
-        String path = scriptEntry.getElement("path").asString();
+        String path  = scriptEntry.getElement("path").asString();
+
+        if (!SAFE_NAME.matcher(table).matches()) {
+            Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                DbErrorEvent.instance.fireFor(id, "Invalid table name: " + table, null, "CSV IMPORT")
+            );
+            return;
+        }
 
         File file = new File(path);
         if (!file.exists()) return;
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
-                 BufferedReader reader = new BufferedReader(
-                         new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+            Connection conn = null;
+            try {
+                conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
+                conn.setAutoCommit(false);
 
-                String headerLine = reader.readLine();
-                if (headerLine == null) return;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
 
-                List<String> headers = parseCsvLine(headerLine);
-                int columnCount = headers.size();
+                    String headerLine = reader.readLine();
+                    if (headerLine == null) return;
 
-                StringBuilder placeholders = new StringBuilder();
-                for (int i = 0; i < columnCount; i++) {
-                    placeholders.append("?");
-                    if (i < columnCount - 1) placeholders.append(",");
-                }
+                    List<String> headers = parseCsvLine(headerLine);
+                    int columnCount = headers.size();
 
-                String sql = "INSERT INTO " + table + " VALUES (" + placeholders + ")";
-                try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                    String line;
-                    int rowsCount = 0;
-
-                    while ((line = reader.readLine()) != null) {
-                        if (line.isBlank()) continue;
-                        List<String> values = parseCsvLine(line);
-                        for (int i = 0; i < Math.min(values.size(), columnCount); i++) {
-                            ps.setObject(i + 1, values.get(i));
-                        }
-                        ps.addBatch();
-                        rowsCount++;
+                    StringBuilder placeholders = new StringBuilder();
+                    for (int i = 0; i < columnCount; i++) {
+                        placeholders.append("?");
+                        if (i < columnCount - 1) placeholders.append(",");
                     }
 
-                    ps.executeBatch();
+                    String sql = "INSERT INTO " + table + " VALUES (" + placeholders + ")";
+                    int rowsCount = 0;
 
+                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.isBlank()) continue;
+                            List<String> values = parseCsvLine(line);
+                            int limit = Math.min(values.size(), columnCount);
+                            for (int i = 0; i < limit; i++) {
+                                ps.setObject(i + 1, values.get(i));
+                            }
+                            for (int i = limit; i < columnCount; i++) {
+                                ps.setObject(i + 1, null);
+                            }
+                            ps.addBatch();
+                            rowsCount++;
+                        }
+                        ps.executeBatch();
+                    }
+
+                    conn.commit();
                     final int finalRowsCount = rowsCount;
                     Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
                         DbCsvImportedEvent.instance.fireFor(id, table, finalRowsCount)
                     );
                 }
             } catch (java.sql.SQLException e) {
+                if (conn != null) { try { conn.rollback(); } catch (Exception ignored) {} }
                 Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
                     DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), "CSV IMPORT " + table)
                 );
             } catch (Exception e) {
                 e.printStackTrace();
+                if (conn != null) { try { conn.rollback(); } catch (Exception ignored) {} }
                 Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
                     DbErrorEvent.instance.fireFor(id, e.getMessage(), null, "CSV IMPORT " + table)
                 );
+            } finally {
+                if (conn != null) {
+                    try { conn.setAutoCommit(true); conn.close(); } catch (Exception ignored) {}
+                }
             }
         });
     }

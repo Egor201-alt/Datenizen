@@ -58,8 +58,14 @@ public class DbTimeoutCommand extends AbstractCommand {
         }
 
         HikariDataSource ds = Datenizen.getInstance().getDatabaseManager().getDataSource(id);
-        if (ds != null && ds.getHikariConfigMXBean() != null) {
-            ds.getHikariConfigMXBean().setConnectionTimeout(ms);
+        if (ds == null) {
+            DbErrorEvent.instance.fireFor(id, "Database ID not found: " + id, null, "db_timeout");
+            return;
         }
+        if (ds.getHikariConfigMXBean() == null) {
+            DbErrorEvent.instance.fireFor(id, "HikariCP config MX Bean unavailable for: " + id, null, "db_timeout");
+            return;
+        }
+        ds.getHikariConfigMXBean().setConnectionTimeout(ms);
     }
 }

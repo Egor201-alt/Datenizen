@@ -16,11 +16,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class DatabaseManager {
 
-    private final Map<String, HikariDataSource> connectionPools       = new ConcurrentHashMap<>();
+    private record ConnectionParams(String driver, String url, String user, String password) {}
+
+    private final Map<String, HikariDataSource>  connectionPools       = new ConcurrentHashMap<>();
     private final Map<String, Connection>        activeTransactions    = new ConcurrentHashMap<>();
     private final Map<String, Long>              transactionStartTimes = new ConcurrentHashMap<>();
     private final Map<String, String>            transactionDbIds      = new ConcurrentHashMap<>();
-    private final Map<String, HikariConfig>      savedConfigs          = new ConcurrentHashMap<>();
+    private final Map<String, ConnectionParams>  savedParams           = new ConcurrentHashMap<>();
 
     private static final Map<String, String> DRIVER_ALIASES = Map.of(
         "sqlite",     "org.sqlite.JDBC",
@@ -94,7 +96,7 @@ public class DatabaseManager {
         try {
             HikariDataSource ds = new HikariDataSource(config);
             connectionPools.put(id, ds);
-            savedConfigs.put(id, config);
+            savedParams.put(id, new ConnectionParams(driver, url, user != null ? user : "", password != null ? password : ""));
             return true;
         } catch (Exception e) {
             Bukkit.getLogger().severe("[Datenizen] Failed to connect to database '" + id + "': " + e.getMessage());
@@ -103,11 +105,22 @@ public class DatabaseManager {
     }
 
     public boolean reconnect(String id) {
-        HikariConfig config = savedConfigs.get(id);
-        if (config == null) return false;
+        ConnectionParams params = savedParams.get(id);
+        if (params == null) return false;
 
         HikariDataSource old = connectionPools.remove(id);
         if (old != null && !old.isClosed()) old.close();
+
+        HikariConfig config = new HikariConfig();
+        config.setDriverClassName(params.driver());
+        config.setJdbcUrl(params.url());
+        if (!params.user().isEmpty())     config.setUsername(params.user());
+        if (!params.password().isEmpty()) config.setPassword(params.password());
+        config.setMaximumPoolSize(10);
+        config.setMinimumIdle(2);
+        config.setConnectionTimeout(10000);
+        config.setIdleTimeout(600000);
+        config.setPoolName("Datenizen-" + id);
 
         try {
             HikariDataSource ds = new HikariDataSource(config);
@@ -128,7 +141,7 @@ public class DatabaseManager {
             try { rollbackTransaction(tx); } catch (SQLException ignored) {}
         }
 
-        savedConfigs.remove(id);
+        savedParams.remove(id);
         HikariDataSource ds = connectionPools.remove(id);
         if (ds != null) {
             if (!ds.isClosed()) ds.close();
@@ -231,7 +244,7 @@ public class DatabaseManager {
         activeTransactions.clear();
         transactionStartTimes.clear();
         transactionDbIds.clear();
-        savedConfigs.clear();
+        savedParams.clear();
 
         for (HikariDataSource ds : connectionPools.values()) {
             if (ds != null && !ds.isClosed()) ds.close();

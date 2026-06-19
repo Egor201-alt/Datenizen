@@ -101,6 +101,13 @@ public class DbUpsertCommand extends AbstractCommand {
             pairs.add(new Pair(col, val));
         }
 
+        if (pairs.isEmpty()) {
+            Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                DbErrorEvent.instance.fireFor(id, "set list must not be empty", null, "db_upsert")
+            );
+            return;
+        }
+
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
             String dbType = Datenizen.getInstance().getDatabaseManager().getDatabaseType(id);
             String sql = buildSql(dbType, table, keyCol, pairs);

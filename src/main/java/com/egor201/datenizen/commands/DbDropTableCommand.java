@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbErrorEvent;
+import com.egor201.datenizen.events.DbExecutedEvent;
 import org.bukkit.Bukkit;
 
 import java.sql.Connection;
@@ -67,6 +68,9 @@ public class DbDropTableCommand extends AbstractCommand {
             try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
                  Statement st = conn.createStatement()) {
                 st.executeUpdate(sql);
+                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                    DbExecutedEvent.instance.fireFor(id, "db_drop_table", 0)
+                );
             } catch (java.sql.SQLException e) {
                 Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
                     DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
