@@ -11,6 +11,7 @@ public final class SqlUtils {
         List<String> fields = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inQuotes = false;
+        boolean wasQuoted = false;
 
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
@@ -28,15 +29,17 @@ public final class SqlUtils {
             } else {
                 if (c == '"') {
                     inQuotes = true;
+                    wasQuoted = true;
                 } else if (c == ',') {
-                    fields.add(current.toString().trim());
+                    fields.add(wasQuoted ? current.toString() : current.toString().trim());
                     current.setLength(0);
+                    wasQuoted = false;
                 } else {
                     current.append(c);
                 }
             }
         }
-        fields.add(current.toString().trim());
+        fields.add(wasQuoted ? current.toString() : current.toString().trim());
         return fields;
     }
 
