@@ -59,7 +59,10 @@ public class DbBackupCommand extends AbstractCommand {
         if (ds == null) return;
 
         String url = ds.getJdbcUrl();
-        if (!url.startsWith("jdbc:sqlite:")) return;
+        if (!url.startsWith("jdbc:sqlite:")) {
+            DbErrorEvent.instance.fireFor(id, "db_backup only supports SQLite databases", null, "db_backup");
+            return;
+        }
 
         String sourceFile = url.replace("jdbc:sqlite:", "");
 

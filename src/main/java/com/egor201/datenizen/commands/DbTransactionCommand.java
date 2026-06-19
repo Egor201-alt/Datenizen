@@ -64,7 +64,10 @@ public class DbTransactionCommand extends AbstractCommand {
         try {
             switch (action) {
                 case "start" -> {
-                    if (id.isEmpty()) return;
+                    if (id.isEmpty()) {
+                        DbErrorEvent.instance.fireFor("", "id is required for db_transaction action:start", null, "db_transaction");
+                        return;
+                    }
                     Datenizen.getInstance().getDatabaseManager().startTransaction(txId, id);
                 }
                 case "commit" -> Datenizen.getInstance().getDatabaseManager().commitTransaction(txId);

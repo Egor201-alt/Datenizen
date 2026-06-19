@@ -104,12 +104,18 @@ public class DbConnectCommand extends AbstractCommand {
         String url = DatabaseManager.resolveUrl(driver, urlInput);
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
+            if (Datenizen.getInstance().getDatabaseManager().getDataSource(id) != null) {
+                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                    DbErrorEvent.instance.fireFor(id, "A connection with id '" + id + "' already exists", "db_connect")
+                );
+                return;
+            }
             boolean success = Datenizen.getInstance().getDatabaseManager().connect(id, driver, url, user, pass);
             Bukkit.getScheduler().runTask(Datenizen.getInstance(), () -> {
                 if (success) {
                     DbConnectedEvent.instance.fireFor(id);
                 } else {
-                    DbErrorEvent.instance.fireFor(id, "Failed to connect. Check server log for details.", "db_connect");
+                    DbErrorEvent.instance.fireFor(id, "Failed to connect to '" + id + "'. Check server log for details.", "db_connect");
                 }
             });
         });

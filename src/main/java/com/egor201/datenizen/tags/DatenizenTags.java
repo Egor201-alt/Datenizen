@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.tags.TagManager;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbErrorEvent;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
@@ -181,8 +182,13 @@ public class DatenizenTags {
                         while (rs.next()) {
                             JsonObject obj = new JsonObject();
                             for (int i = 1; i <= cols; i++) {
+                                String colName = meta.getColumnName(i);
                                 String val = rs.getString(i);
-                                obj.addProperty(meta.getColumnName(i), val == null ? "null" : val);
+                                if (val == null) {
+                                    obj.add(colName, JsonNull.INSTANCE);
+                                } else {
+                                    obj.addProperty(colName, val);
+                                }
                             }
                             arr.add(obj);
                         }
@@ -237,7 +243,7 @@ public class DatenizenTags {
                 attribute.fulfill(1);
                 try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id)) {
                     DatabaseMetaData meta = conn.getMetaData();
-                    try (ResultSet rs = meta.getTables(null, null, table, null)) {
+                    try (ResultSet rs = meta.getTables(null, null, table, new String[]{"TABLE"})) {
                         return new ElementTag(rs.next());
                     }
                 } catch (Exception e) {
@@ -486,34 +492,5 @@ public class DatenizenTags {
             return list;
         });
 
-        // <--[tag]
-        // @Attribute <db_table_exists[<id>|<table_name>]>
-        // @Returns ElementTag(Boolean)
-        // @Group Datenizen
-        // @Description Cleaner single-param syntax to check if a table exists.
-        //
-        // @Usage
-        // - if <db_table_exists[main|players]>:
-        //   - narrate "Table exists."
-        // -->
-        TagManager.registerTagHandler(ElementTag.class, "db_table_exists", attribute -> {
-            if (!attribute.hasParam()) return new ElementTag(false);
-            String param = attribute.getParam();
-            attribute.fulfill(1);
-            int sep = param.indexOf('|');
-            if (sep < 1) return new ElementTag(false);
-            String id    = param.substring(0, sep);
-            String table = param.substring(sep + 1);
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id)) {
-                DatabaseMetaData meta = conn.getMetaData();
-                try (ResultSet rs = meta.getTables(null, null, table, null)) {
-                    return new ElementTag(rs.next());
-                }
-            } catch (Exception e) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, "CHECK TABLE EXISTS"));
-            }
-            return new ElementTag(false);
-        });
     }
 }

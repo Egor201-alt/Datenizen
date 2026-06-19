@@ -73,7 +73,12 @@ public class DbExecuteSyncCommand extends AbstractCommand {
                     ? Datenizen.getInstance().getDatabaseManager().getTransactionConnection(txId)
                     : Datenizen.getInstance().getDatabaseManager().getConnection(id);
 
-            if (conn == null) throw new Exception("Connection not found for id: " + id);
+            if (conn == null) {
+                String msg = txId != null
+                    ? "Transaction '" + txId + "' not found or already committed/rolled back"
+                    : "Database ID '" + id + "' not found";
+                throw new Exception(msg);
+            }
 
             ps = conn.prepareStatement(sql);
             if (args != null) {
