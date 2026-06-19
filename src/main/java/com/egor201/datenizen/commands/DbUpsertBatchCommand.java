@@ -181,10 +181,17 @@ public class DbUpsertBatchCommand extends AbstractCommand {
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
                     for (MapTag row : parsedRows) {
                         int idx = 1;
-                        ps.setObject(idx++, row.map.get(keyHolder).toString());
-                        for (String col : finalCols) ps.setObject(idx++, row.map.get(new StringHolder(col)).toString());
+                        ObjectTag kv = row.map.get(keyHolder);
+                        ps.setObject(idx++, kv != null ? kv.toString() : null);
+                        for (String col : finalCols) {
+                            ObjectTag cv = row.map.get(new StringHolder(col));
+                            ps.setObject(idx++, cv != null ? cv.toString() : null);
+                        }
                         if (dbType.equals("mysql") || dbType.equals("mariadb")) {
-                            for (String col : finalCols) ps.setObject(idx++, row.map.get(new StringHolder(col)).toString());
+                            for (String col : finalCols) {
+                                ObjectTag cv = row.map.get(new StringHolder(col));
+                                ps.setObject(idx++, cv != null ? cv.toString() : null);
+                            }
                         }
                         ps.addBatch();
                     }
