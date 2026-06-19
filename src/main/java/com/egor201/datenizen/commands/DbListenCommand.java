@@ -8,7 +8,11 @@ import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbErrorEvent;
 import org.bukkit.Bukkit;
 
+import java.util.regex.Pattern;
+
 public class DbListenCommand extends AbstractCommand {
+
+    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
 
     // <--[command]
     // @Name db_listen
@@ -53,6 +57,11 @@ public class DbListenCommand extends AbstractCommand {
         String id      = se.getElement("id").asString();
         String channel = se.getElement("channel").asString();
         String action  = se.getElement("action").asString().toLowerCase();
+
+        if (!SAFE_NAME.matcher(channel).matches()) {
+            DbErrorEvent.instance.fireFor(id, "Invalid channel name: " + channel, null, "db_listen");
+            return;
+        }
 
         String dbType = Datenizen.getInstance().getDatabaseManager().getDatabaseType(id);
         if (!dbType.equals("postgresql")) {
