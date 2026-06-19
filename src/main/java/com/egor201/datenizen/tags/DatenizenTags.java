@@ -492,5 +492,75 @@ public class DatenizenTags {
             return list;
         });
 
+        // <--[tag]
+        // @Attribute <db_cached_query[<id>].sql[<query>].ttl[<ticks>].args[<list>]>
+        // @Returns ListTag
+        // @Group Datenizen
+        // @Description Returns query results cached for the given TTL in ticks.
+        // The first call runs the query and caches the result; subsequent calls within the TTL
+        // return the cached ListTag of MapTags without hitting the database.
+        // Cache is automatically invalidated when the connection is disconnected.
+        // -->
+        TagManager.registerTagHandler(ListTag.class, "db_cached_query", attribute -> {
+            if (!attribute.hasParam()) return null;
+            String id = attribute.getParam();
+            attribute.fulfill(1);
+            if (!attribute.startsWith("sql") || !attribute.hasParam()) return null;
+            String sql = attribute.getParam();
+            attribute.fulfill(1);
+            if (!attribute.startsWith("ttl") || !attribute.hasParam()) return null;
+            long ttlTicks;
+            try { ttlTicks = Long.parseLong(attribute.getParam()); } catch (NumberFormatException e) { return null; }
+            attribute.fulfill(1);
+            long ttlMs = ttlTicks * 50L;
+            ListTag args = attribute.startsWith("args") && attribute.hasParam() ? attribute.contextAsType(1, ListTag.class) : null;
+            if (args != null) attribute.fulfill(1);
+
+            String cacheKey = id + ":" + sql + ":" + (args != null ? args.identify() : "");
+            long now = System.currentTimeMillis();
+
+            ListTag cached = Datenizen.getInstance().getDatabaseManager().getCached(cacheKey, now);
+            if (cached != null) return cached;
+
+            ListTag result = getResultSetAsList(id, sql, args);
+            if (result != null) {
+                Datenizen.getInstance().getDatabaseManager().putCache(cacheKey, result, now + ttlMs);
+            }
+            return result;
+        });
+
+        // <--[tag]
+        // @Attribute <db_query_page[<id>].sql[<query>].page[<n>].size[<size>].args[<list>]>
+        // @Returns ListTag
+        // @Group Datenizen
+        // @Description Returns a paginated slice of query results (page is 1-based, default size 20).
+        // Appends LIMIT and OFFSET to the provided SQL query.
+        // -->
+        TagManager.registerTagHandler(ListTag.class, "db_query_page", attribute -> {
+            if (!attribute.hasParam()) return null;
+            String id = attribute.getParam();
+            attribute.fulfill(1);
+            if (!attribute.startsWith("sql") || !attribute.hasParam()) return null;
+            String sql = attribute.getParam();
+            attribute.fulfill(1);
+            if (!attribute.startsWith("page") || !attribute.hasParam()) return null;
+            int page;
+            try { page = Integer.parseInt(attribute.getParam()); } catch (NumberFormatException e) { return null; }
+            attribute.fulfill(1);
+            int size = 20;
+            if (attribute.startsWith("size") && attribute.hasParam()) {
+                try { size = Integer.parseInt(attribute.getParam()); } catch (NumberFormatException e) { return null; }
+                attribute.fulfill(1);
+            }
+            ListTag args = attribute.startsWith("args") && attribute.hasParam() ? attribute.contextAsType(1, ListTag.class) : null;
+            if (args != null) attribute.fulfill(1);
+
+            if (page < 1) page = 1;
+            if (size < 1) size = 1;
+            int offset = (page - 1) * size;
+            String pagedSql = sql + " LIMIT " + size + " OFFSET " + offset;
+            return getResultSetAsList(id, pagedSql, args);
+        });
+
     }
 }

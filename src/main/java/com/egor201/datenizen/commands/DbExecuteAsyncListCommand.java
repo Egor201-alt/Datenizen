@@ -17,9 +17,9 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
 
     // <--[command]
     // @Name db_execute_async_list
-    // @Syntax db_execute_async_list [id:<id>] [sql:<list>]
+    // @Syntax db_execute_async_list [id:<id>] [sql:<list>] (label:<label>)
     // @Required 2
-    // @Maximum 2
+    // @Maximum 3
     // @Short Executes a list of parameterized SQL queries asynchronously.
     // @Group Datenizen
     //
@@ -27,12 +27,13 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
     // Runs multiple SQL statements sequentially in a single async task.
     // Each entry in the list is treated as a separate PreparedStatement to prevent SQL injection.
     // Statements are executed inside a transaction and rolled back on failure.
+    // Fires 'db executed' with the optional label on success.
     // -->
 
     public DbExecuteAsyncListCommand() {
         setName("db_execute_async_list");
-        setSyntax("db_execute_async_list [id:<id>] [sql:<list>]");
-        setRequiredArguments(2, 2);
+        setSyntax("db_execute_async_list [id:<id>] [sql:<list>] (label:<label>)");
+        setRequiredArguments(2, 3);
     }
 
     @Override
@@ -42,6 +43,8 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
                 scriptEntry.addObject("id", arg.asElement());
             } else if (!scriptEntry.hasObject("sql") && arg.matchesPrefix("sql")) {
                 scriptEntry.addObject("sql", arg.asType(ListTag.class));
+            } else if (!scriptEntry.hasObject("label") && arg.matchesPrefix("label")) {
+                scriptEntry.addObject("label", arg.asElement());
             } else {
                 arg.reportUnhandled();
             }
@@ -55,6 +58,7 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
     public void execute(ScriptEntry scriptEntry) {
         String id = scriptEntry.getElement("id").asString();
         ListTag sqlList = scriptEntry.getObjectTag("sql");
+        String label = scriptEntry.hasObject("label") ? scriptEntry.getElement("label").asString() : null;
 
         if (sqlList == null || sqlList.isEmpty()) return;
 
@@ -72,7 +76,7 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
 
                 conn.commit();
                 Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbExecutedEvent.instance.fireFor(id, null, 0)
+                    DbExecutedEvent.instance.fireFor(id, label, 0)
                 );
             } catch (Exception e) {
                 e.printStackTrace();

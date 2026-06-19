@@ -1,5 +1,6 @@
 package com.egor201.datenizen.database;
 
+import com.denizenscript.denizencore.objects.core.ListTag;
 import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbConnectionLeakedEvent;
 import com.egor201.datenizen.events.DbDisconnectedEvent;
@@ -23,6 +24,9 @@ public class DatabaseManager {
     private final Map<String, Long>              transactionStartTimes = new ConcurrentHashMap<>();
     private final Map<String, String>            transactionDbIds      = new ConcurrentHashMap<>();
     private final Map<String, ConnectionParams>  savedParams           = new ConcurrentHashMap<>();
+    private final Map<String, String>            namedQueries          = new ConcurrentHashMap<>();
+    // Object[] = { ListTag result, Long expiresAtMs }
+    private final Map<String, Object[]>          queryCache            = new ConcurrentHashMap<>();
 
     private static final Map<String, String> DRIVER_ALIASES = Map.of(
         "sqlite",     "org.sqlite.JDBC",
@@ -132,6 +136,29 @@ public class DatabaseManager {
         }
     }
 
+    public void registerQuery(String id, String name, String sql) {
+        namedQueries.put(id + ":" + name, sql);
+    }
+
+    public String getNamedQuery(String id, String name) {
+        return namedQueries.get(id + ":" + name);
+    }
+
+    public ListTag getCached(String key, long nowMs) {
+        Object[] entry = queryCache.get(key);
+        if (entry == null) return null;
+        if (nowMs > (long) entry[1]) { queryCache.remove(key); return null; }
+        return (ListTag) entry[0];
+    }
+
+    public void putCache(String key, ListTag result, long expiresAtMs) {
+        queryCache.put(key, new Object[]{result, expiresAtMs});
+    }
+
+    public void invalidateCache(String id) {
+        queryCache.keySet().removeIf(k -> k.startsWith(id + ":"));
+    }
+
     public boolean disconnect(String id) {
         List<String> txToRollback = new ArrayList<>();
         for (Map.Entry<String, String> entry : transactionDbIds.entrySet()) {
@@ -141,6 +168,8 @@ public class DatabaseManager {
             try { rollbackTransaction(tx); } catch (SQLException ignored) {}
         }
 
+        invalidateCache(id);
+        namedQueries.keySet().removeIf(k -> k.startsWith(id + ":"));
         savedParams.remove(id);
         HikariDataSource ds = connectionPools.remove(id);
         if (ds != null) {
@@ -257,6 +286,8 @@ public class DatabaseManager {
         transactionStartTimes.clear();
         transactionDbIds.clear();
         savedParams.clear();
+        namedQueries.clear();
+        queryCache.clear();
 
         for (HikariDataSource ds : connectionPools.values()) {
             if (ds != null && !ds.isClosed()) ds.close();

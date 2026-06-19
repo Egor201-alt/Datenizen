@@ -13,20 +13,24 @@ public class DbTransactionCommand extends AbstractCommand {
 
     // <--[command]
     // @Name db_transaction
-    // @Syntax db_transaction [id:<id>] [action:start/commit/rollback] [tx:<tx_id>]
+    // @Syntax db_transaction [id:<id>] [action:start/commit/rollback/savepoint/rollback_to/release] [tx:<tx_id>] (savepoint:<name>)
     // @Required 3
-    // @Maximum 3
-    // @Short Manages SQL transactions.
+    // @Maximum 4
+    // @Short Manages SQL transactions and savepoints.
     // @Group Datenizen
     //
     // @Description
     // Starts, commits, or rolls back a transaction.
+    // Savepoint actions (savepoint, rollback_to, release) require tx:<tx_id> and savepoint:<name>.
+    // Savepoint names must be alphanumeric/underscores only.
     // -->
+
+    private static final java.util.regex.Pattern SAFE_NAME = java.util.regex.Pattern.compile("^[a-zA-Z0-9_]+$");
 
     public DbTransactionCommand() {
         setName("db_transaction");
-        setSyntax("db_transaction [id:<id>] [action:start/commit/rollback] [tx:<tx_id>]");
-        setRequiredArguments(3, 3);
+        setSyntax("db_transaction [id:<id>] [action:start/commit/rollback/savepoint/rollback_to/release] [tx:<tx_id>] (savepoint:<name>)");
+        setRequiredArguments(3, 4);
     }
 
     @Override
@@ -38,6 +42,8 @@ public class DbTransactionCommand extends AbstractCommand {
                 scriptEntry.addObject("action", arg.asElement());
             } else if (!scriptEntry.hasObject("tx") && arg.matchesPrefix("tx")) {
                 scriptEntry.addObject("tx", arg.asElement());
+            } else if (!scriptEntry.hasObject("savepoint") && arg.matchesPrefix("savepoint")) {
+                scriptEntry.addObject("savepoint", arg.asElement());
             } else {
                 arg.reportUnhandled();
             }
@@ -60,6 +66,41 @@ public class DbTransactionCommand extends AbstractCommand {
         String id = idTag != null ? idTag.asString() : "";
         String action = actionTag.asString().toLowerCase();
         String txId = txTag.asString();
+
+        if (action.equals("savepoint") || action.equals("rollback_to") || action.equals("release")) {
+            ElementTag spTag = scriptEntry.getElement("savepoint");
+            if (spTag == null) {
+                DbErrorEvent.instance.fireFor(id, "savepoint name required for action:" + action, null, "db_transaction");
+                return;
+            }
+            String spName = spTag.asString();
+            if (!SAFE_NAME.matcher(spName).matches()) {
+                DbErrorEvent.instance.fireFor(id, "Invalid savepoint name: " + spName, null, "db_transaction");
+                return;
+            }
+            java.sql.Connection spConn = Datenizen.getInstance().getDatabaseManager().getTransactionConnection(txId);
+            if (spConn == null) {
+                DbErrorEvent.instance.fireFor(id, "Transaction '" + txId + "' not found or already committed/rolled back", null, "db_transaction");
+                return;
+            }
+            String spSql = switch (action) {
+                case "savepoint"   -> "SAVEPOINT " + spName;
+                case "rollback_to" -> "ROLLBACK TO SAVEPOINT " + spName;
+                default            -> "RELEASE SAVEPOINT " + spName;
+            };
+            Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
+                try (java.sql.Statement st = spConn.createStatement()) {
+                    st.execute(spSql);
+                } catch (Exception e) {
+                    Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                        DbErrorEvent.instance.fireFor(id, e.getMessage(),
+                            e instanceof java.sql.SQLException ? ((java.sql.SQLException) e).getSQLState() : null,
+                            "db_transaction " + action)
+                    );
+                }
+            });
+            return;
+        }
 
         try {
             switch (action) {
