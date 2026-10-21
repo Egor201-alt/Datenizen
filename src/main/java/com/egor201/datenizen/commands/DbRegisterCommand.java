@@ -6,7 +6,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 
-public class DbRegisterCommand extends AbstractCommand {
+public class DbRegisterCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_register
@@ -26,27 +26,13 @@ public class DbRegisterCommand extends AbstractCommand {
     // -->
 
     public DbRegisterCommand() {
-        setName("db_register");
-        setSyntax("db_register [id:<id>] [name:<name>] [sql:<query>]");
-        setRequiredArguments(3, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("name") && arg.matchesPrefix("name")) {
-                se.addObject("name", arg.asElement());
-            } else if (!se.hasObject("sql") && arg.matchesPrefix("sql")) {
-                se.addObject("sql", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("name") || !se.hasObject("sql")) {
-            throw new InvalidArgumentsException("Must specify id, name, and sql!");
-        }
+        super("db_register",
+              "db_register [id:<id>] [name:<name>] [sql:<query>]",
+              3, 3,
+              "Must specify id, name, and sql!",
+              ArgSpec.element("id"),
+              ArgSpec.element("name"),
+              ArgSpec.element("sql"));
     }
 
     @Override

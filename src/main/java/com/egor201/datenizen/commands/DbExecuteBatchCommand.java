@@ -14,7 +14,7 @@ import org.bukkit.Bukkit;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 
-public class DbExecuteBatchCommand extends AbstractCommand {
+public class DbExecuteBatchCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_execute_batch
@@ -38,32 +38,14 @@ public class DbExecuteBatchCommand extends AbstractCommand {
     // -->
 
     public DbExecuteBatchCommand() {
-        setName("db_execute_batch");
-        setSyntax("db_execute_batch [id:<id>] [sql:<query>] [args:<list_of_lists>] (label:<label>)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("sql") && arg.matchesPrefix("sql")) {
-                scriptEntry.addObject("sql", arg.asElement());
-            } else if (!scriptEntry.hasObject("sql") && !arg.hasPrefix()
-                    && arg.getValue().startsWith("sql:")) {
-                scriptEntry.addObject("sql", new ElementTag(arg.getValue().substring(4)));
-            } else if (!scriptEntry.hasObject("args") && arg.matchesPrefix("args")) {
-                scriptEntry.addObject("args", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("label") && arg.matchesPrefix("label")) {
-                scriptEntry.addObject("label", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("sql") || !scriptEntry.hasObject("args")) {
-            throw new InvalidArgumentsException("Must specify id, sql, and args!");
-        }
+        super("db_execute_batch",
+              "db_execute_batch [id:<id>] [sql:<query>] [args:<list_of_lists>] (label:<label>)",
+              3, 4,
+              "Must specify id, sql, and args!",
+              ArgSpec.element("id"),
+              ArgSpec.sql("sql"),
+              ArgSpec.list("args"),
+              ArgSpec.optionalElement("label"));
     }
 
     @Override

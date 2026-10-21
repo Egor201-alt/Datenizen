@@ -2,6 +2,7 @@ package com.egor201.datenizen.commands;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
@@ -16,13 +17,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class DbTableDeleteCommand extends AbstractCommand {
+public class DbTableDeleteCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_table_delete
-    // @Syntax db_table_delete [id:<id>] [table:<table>] [where:<list>] (label:<label>)
+    // @Syntax db_table_delete [id:<id>] [table:<table>] [where:<list>] (timeout:<ms>) (label:<label>)
     // @Required 3
-    // @Maximum 4
+    // @Maximum 5
     // @Short Deletes rows from a table without writing SQL manually.
     // @Group Datenizen
     //
@@ -37,32 +38,18 @@ public class DbTableDeleteCommand extends AbstractCommand {
     // - db_table_delete id:main table:players where:<list[uuid=abc-123]> label:remove_player
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbTableDeleteCommand() {
-        setName("db_table_delete");
-        setSyntax("db_table_delete [id:<id>] [table:<table>] [where:<list>] (label:<label>)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("table") && arg.matchesPrefix("table")) {
-                scriptEntry.addObject("table", arg.asElement());
-            } else if (!scriptEntry.hasObject("where") && arg.matchesPrefix("where")) {
-                scriptEntry.addObject("where", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("label") && arg.matchesPrefix("label")) {
-                scriptEntry.addObject("label", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("table") || !scriptEntry.hasObject("where")) {
-            throw new InvalidArgumentsException("Must specify id, table, and where!");
-        }
+        super("db_table_delete",
+              "db_table_delete [id:<id>] [table:<table>] [where:<list>] (timeout:<ms>) (label:<label>)",
+              3, 5,
+              "Must specify id, table, and where!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.list("where"),
+              ArgSpec.optionalElement("timeout"),
+              ArgSpec.optionalElement("label"));
     }
 
     private record Pair(String col, String val) {}
@@ -72,7 +59,18 @@ public class DbTableDeleteCommand extends AbstractCommand {
         String id = scriptEntry.getElement("id").asString();
         String table = scriptEntry.getElement("table").asString();
         ListTag whereList = scriptEntry.getObjectTag("where");
+        ElementTag timeoutTag = scriptEntry.getElement("timeout");
         String label = scriptEntry.hasObject("label") ? scriptEntry.getElement("label").asString() : null;
+
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = com.egor201.datenizen.util.SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_table_delete");
+                return;
+            }
+        }
+        final long finalTimeout = timeoutMs;
 
         if (!SAFE_NAME.matcher(table).matches()) {
             Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
@@ -117,26 +115,26 @@ public class DbTableDeleteCommand extends AbstractCommand {
         String sql = "DELETE FROM " + table + " WHERE " + wherePart;
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
+            long start = System.nanoTime();
+            com.egor201.datenizen.database.DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
+            try (Connection conn = manager.getConnection(id);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
 
+                DbCommandSupport.applySettings(ps, finalTimeout);
                 for (int i = 0; i < wherePairs.size(); i++) {
                     ps.setObject(i + 1, wherePairs.get(i).val());
                 }
 
                 int affected = ps.executeUpdate();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbExecutedEvent.instance.fireFor(id, label, affected)
-                );
-            } catch (java.sql.SQLException e) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
-                );
+                manager.afterWrite(id);
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, true, sql);
+                DbCommandSupport.executed(id, label, affected, null, duration);
             } catch (Exception e) {
-                e.printStackTrace();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, sql)
-                );
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, false, sql);
+                manager.recordError(id, e, sql);
+                DbCommandSupport.error(id, e, sql);
             }
         });
     }

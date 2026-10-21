@@ -15,7 +15,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbTableCreateCommand extends AbstractCommand {
+public class DbTableCreateCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_table_create
@@ -39,32 +39,17 @@ public class DbTableCreateCommand extends AbstractCommand {
     // - db_table_create id:main table:logs columns:<list[id INTEGER PRIMARY KEY|message TEXT|timestamp INTEGER]> if_not_exists:false
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbTableCreateCommand() {
-        setName("db_table_create");
-        setSyntax("db_table_create [id:<id>] [table:<table>] [columns:<list>] (if_not_exists:true/false)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("table") && arg.matchesPrefix("table")) {
-                scriptEntry.addObject("table", arg.asElement());
-            } else if (!scriptEntry.hasObject("columns") && arg.matchesPrefix("columns")) {
-                scriptEntry.addObject("columns", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("if_not_exists") && arg.matchesPrefix("if_not_exists")) {
-                scriptEntry.addObject("if_not_exists", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("table") || !scriptEntry.hasObject("columns")) {
-            throw new InvalidArgumentsException("Must specify id, table, and columns!");
-        }
+        super("db_table_create",
+              "db_table_create [id:<id>] [table:<table>] [columns:<list>] (if_not_exists:true/false)",
+              3, 4,
+              "Must specify id, table, and columns!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.list("columns"),
+              ArgSpec.optionalElement("if_not_exists"));
     }
 
     @Override

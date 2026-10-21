@@ -13,7 +13,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbRenameTableCommand extends AbstractCommand {
+public class DbRenameTableCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_rename_table
@@ -27,24 +27,16 @@ public class DbRenameTableCommand extends AbstractCommand {
     // - db_rename_table id:main from:players to:players_old
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbRenameTableCommand() {
-        setName("db_rename_table");
-        setSyntax("db_rename_table [id:<id>] [from:<table>] [to:<table>]");
-        setRequiredArguments(3, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("from") && arg.matchesPrefix("from")) se.addObject("from", arg.asElement());
-            else if (!se.hasObject("to") && arg.matchesPrefix("to")) se.addObject("to", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("from") || !se.hasObject("to"))
-            throw new InvalidArgumentsException("Must specify id, from, and to!");
+        super("db_rename_table",
+              "db_rename_table [id:<id>] [from:<table>] [to:<table>]",
+              3, 3,
+              "Must specify id, from, and to!",
+              ArgSpec.element("id"),
+              ArgSpec.element("from"),
+              ArgSpec.element("to"));
     }
 
     @Override

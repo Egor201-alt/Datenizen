@@ -6,7 +6,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 
-public class DbCleanPoolCommand extends AbstractCommand {
+public class DbCleanPoolCommand extends AbstractDbCommand {
     // <--[command]
     // @Name db_clean_pool
     // @Syntax db_clean_pool[id:<id>]
@@ -16,23 +16,8 @@ public class DbCleanPoolCommand extends AbstractCommand {
     // @Group Datenizen
     // -->
     public DbCleanPoolCommand() {
-        setName("db_clean_pool");
-        setSyntax("db_clean_pool [id:<id>]");
-        setRequiredArguments(1, 1);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id")) {
-            throw new InvalidArgumentsException("Must specify id!");
-        }
+        super("db_clean_pool", "db_clean_pool [id:<id>]", 1, 1, "Must specify id!",
+              ArgSpec.element("id"));
     }
 
     @Override

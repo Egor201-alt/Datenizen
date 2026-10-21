@@ -13,7 +13,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbDropIndexCommand extends AbstractCommand {
+public class DbDropIndexCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_drop_index
@@ -33,24 +33,16 @@ public class DbDropIndexCommand extends AbstractCommand {
     // - db_drop_index id:mysql_db name:idx_players_uuid table:players
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbDropIndexCommand() {
-        setName("db_drop_index");
-        setSyntax("db_drop_index [id:<id>] [name:<index_name>] (table:<table>)");
-        setRequiredArguments(2, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("name") && arg.matchesPrefix("name")) se.addObject("name", arg.asElement());
-            else if (!se.hasObject("table") && arg.matchesPrefix("table")) se.addObject("table", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("name"))
-            throw new InvalidArgumentsException("Must specify id and name!");
+        super("db_drop_index",
+              "db_drop_index [id:<id>] [name:<index_name>] (table:<table>)",
+              2, 3,
+              "Must specify id and name!",
+              ArgSpec.element("id"),
+              ArgSpec.element("name"),
+              ArgSpec.optionalElement("table"));
     }
 
     @Override

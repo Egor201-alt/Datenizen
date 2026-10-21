@@ -21,7 +21,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 
-public class DbExportCsvCommand extends AbstractCommand {
+public class DbExportCsvCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_export_csv
@@ -40,32 +40,14 @@ public class DbExportCsvCommand extends AbstractCommand {
     // -->
 
     public DbExportCsvCommand() {
-        setName("db_export_csv");
-        setSyntax("db_export_csv [id:<id>] [sql:<query>] [path:<path>] (args:<list>)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("sql") && arg.matchesPrefix("sql")) {
-                se.addObject("sql", arg.asElement());
-            } else if (!se.hasObject("sql") && !arg.hasPrefix()
-                    && arg.getValue().startsWith("sql:")) {
-                se.addObject("sql", new ElementTag(arg.getValue().substring(4)));
-            } else if (!se.hasObject("path") && arg.matchesPrefix("path")) {
-                se.addObject("path", arg.asElement());
-            } else if (!se.hasObject("args") && arg.matchesPrefix("args")) {
-                se.addObject("args", arg.asType(ListTag.class));
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("sql") || !se.hasObject("path")) {
-            throw new InvalidArgumentsException("Must specify id, sql, and path!");
-        }
+        super("db_export_csv",
+              "db_export_csv [id:<id>] [sql:<query>] [path:<path>] (args:<list>)",
+              3, 4,
+              "Must specify id, sql, and path!",
+              ArgSpec.element("id"),
+              ArgSpec.sql("sql"),
+              ArgSpec.element("path"),
+              ArgSpec.optionalList("args"));
     }
 
     private String escapeCsvField(String value) {
@@ -84,7 +66,7 @@ public class DbExportCsvCommand extends AbstractCommand {
         ListTag args = se.getObjectTag("args");
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            File outputFile = new File(path);
+            File outputFile = com.egor201.datenizen.Settings.resolvePath(path);
             if (outputFile.getParentFile() != null) {
                 outputFile.getParentFile().mkdirs();
             }

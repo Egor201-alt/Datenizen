@@ -1,77 +1,85 @@
 package com.egor201.datenizen.commands;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
-import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
-import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
-import com.egor201.datenizen.events.DbErrorEvent;
+import com.egor201.datenizen.database.DatabaseManager;
+import com.egor201.datenizen.database.ResultMapper;
+import com.egor201.datenizen.util.NamedParams;
+import com.egor201.datenizen.util.SqlUtils;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 
-public class DbExecuteSyncCommand extends AbstractCommand {
+public class DbExecuteSyncCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_execute_sync
-    // @Syntax db_execute_sync [id:<id>] [sql:<query>] (args:<list>) (tx:<tx_id>)
+    // @Syntax db_execute_sync [id:<id>] [sql:<query>] (args:<list>) (named_args:<map>) (tx:<tx_id>) (timeout:<ms>) (allow_unsafe:<true/false>)
     // @Required 2
-    // @Maximum 4
+    // @Maximum 7
     // @Short Executes a synchronous SQL query on the main thread.
     // @Group Datenizen
     //
     // @Description
     // Executes a query on the main thread. Useful for server shutdown or player quit events.
-    // The sql argument supports both prefixed and quoted forms:
-    //   sql:UPDATE players SET coins=? WHERE uuid=?
-    //   "sql:UPDATE players SET coins=? WHERE uuid=?"
+    // Use either ? placeholders with 'args', or :name placeholders with 'named_args'.
     // -->
-
     public DbExecuteSyncCommand() {
-        setName("db_execute_sync");
-        setSyntax("db_execute_sync [id:<id>] [sql:<query>] (args:<list>) (tx:<tx_id>)");
-        setRequiredArguments(2, 4);
+        super("db_execute_sync",
+              "db_execute_sync [id:<id>] [sql:<query>] (args:<list>) (named_args:<map>) (tx:<tx_id>) (timeout:<ms>) (allow_unsafe:<true/false>)",
+              2, 7,
+              "Must specify id and sql!",
+              ArgSpec.element("id"),
+              ArgSpec.sql("sql"),
+              ArgSpec.optionalList("args"),
+              ArgSpec.optionalMap("named_args"),
+              ArgSpec.optionalElement("tx"),
+              ArgSpec.optionalElement("timeout"),
+              ArgSpec.optionalElement("allow_unsafe"));
     }
 
     @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("sql") && arg.matchesPrefix("sql")) {
-                scriptEntry.addObject("sql", arg.asElement());
-            } else if (!scriptEntry.hasObject("sql") && !arg.hasPrefix()
-                    && arg.getValue().startsWith("sql:")) {
-                scriptEntry.addObject("sql", new ElementTag(arg.getValue().substring(4)));
-            } else if (!scriptEntry.hasObject("args") && arg.matchesPrefix("args")) {
-                scriptEntry.addObject("args", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("tx") && arg.matchesPrefix("tx")) {
-                scriptEntry.addObject("tx", arg.asElement());
-            } else {
-                arg.reportUnhandled();
+    public void execute(ScriptEntry se) {
+        String id = se.getElement("id").asString();
+        String sql = se.getElement("sql").asString();
+        ListTag args = se.getObjectTag("args");
+        MapTag namedArgs = se.getObjectTag("named_args");
+        ElementTag txTag = se.getElement("tx");
+        ElementTag timeoutTag = se.getElement("timeout");
+        ElementTag unsafeTag = se.getElement("allow_unsafe");
+        String txId = txTag != null ? txTag.asString() : null;
+        boolean allowUnsafe = unsafeTag != null && unsafeTag.asBoolean();
+
+        if (!DbCommandSupport.allowUnsafe(id, sql, allowUnsafe, "db_execute_sync")) return;
+
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_execute_sync");
+                return;
             }
         }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("sql")) {
-            throw new InvalidArgumentsException("Must specify id and sql!");
-        }
-    }
 
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
-        String id = scriptEntry.getElement("id").asString();
-        String sql = scriptEntry.getElement("sql").asString();
-        ListTag args = scriptEntry.getObjectTag("args");
-        ElementTag txTag = scriptEntry.getElement("tx");
-        String txId = txTag != null ? txTag.asString() : null;
+        NamedParams.Bound bound;
+        try {
+            bound = NamedParams.bind(sql, namedArgs);
+        } catch (IllegalArgumentException e) {
+            DbCommandSupport.error(id, e.getMessage(), "db_execute_sync");
+            return;
+        }
 
         Connection conn = null;
         PreparedStatement ps = null;
+        long start = System.nanoTime();
+        DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
         try {
             conn = txId != null
-                    ? Datenizen.getInstance().getDatabaseManager().getTransactionConnection(txId)
-                    : Datenizen.getInstance().getDatabaseManager().getConnection(id);
+                ? manager.getTransactionConnection(txId)
+                : manager.getConnection(id);
 
             if (conn == null) {
                 String msg = txId != null
@@ -80,16 +88,24 @@ public class DbExecuteSyncCommand extends AbstractCommand {
                 throw new Exception(msg);
             }
 
-            ps = conn.prepareStatement(sql);
-            if (args != null) {
-                for (int i = 0; i < args.size(); i++) {
-                    ps.setObject(i + 1, args.get(i));
-                }
+            ps = conn.prepareStatement(bound.sql());
+            DbCommandSupport.applySettings(ps, timeoutMs);
+            if (!bound.values().isEmpty()) {
+                ResultMapper.bindValues(ps, bound.values());
+            } else {
+                ResultMapper.bind(ps, args);
             }
+            DbCommandSupport.log(bound.sql());
             ps.executeUpdate();
+
+            manager.afterWrite(id);
+            long duration = DbCommandSupport.elapsedMs(start);
+            manager.recordQuery(id, duration, true, bound.sql());
         } catch (Exception e) {
-            e.printStackTrace();
-            DbErrorEvent.instance.fireFor(id, e.getMessage(), e instanceof java.sql.SQLException ? ((java.sql.SQLException)e).getSQLState() : null, sql);
+            long duration = DbCommandSupport.elapsedMs(start);
+            manager.recordQuery(id, duration, false, bound.sql());
+            manager.recordError(id, e, bound.sql());
+            DbCommandSupport.error(id, e, bound.sql());
         } finally {
             try { if (ps != null) ps.close(); } catch (Exception ignored) {}
             try { if (conn != null && txId == null) conn.close(); } catch (Exception ignored) {}

@@ -6,7 +6,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 
-public class DbDisconnectCommand extends AbstractCommand {
+public class DbDisconnectCommand extends AbstractDbCommand {
     // <--[command]
     // @Name db_disconnect
     // @Syntax db_disconnect [id:<id>]
@@ -15,13 +15,9 @@ public class DbDisconnectCommand extends AbstractCommand {
     // @Short Disconnects and removes a connection pool.
     // @Group Datenizen
     // -->
-    public DbDisconnectCommand() { setName("db_disconnect"); setSyntax("db_disconnect [id:<id>]"); setRequiredArguments(1, 1); }
-    @Override public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id")) throw new InvalidArgumentsException("Must specify id!");
+    public DbDisconnectCommand() {
+        super("db_disconnect", "db_disconnect [id:<id>]", 1, 1, "Must specify id!",
+              ArgSpec.element("id"));
     }
     @Override public void execute(ScriptEntry se) { Datenizen.getInstance().getDatabaseManager().disconnect(se.getElement("id").asString()); }
 }

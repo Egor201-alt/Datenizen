@@ -1,1 +1,39 @@
-# In development :\
+# Datenizen configuration
+#
+# All values are optional. Missing values fall back to the defaults shown here.
+defaults:
+  # Default HikariCP pool size for db_connect when pool_max/pool_min are not set.
+  pool_max: 10
+  pool_min: 2
+
+  # How long to wait for a pooled connection, in milliseconds.
+  connection_timeout_ms: 10000
+
+  # Default JDBC query timeout in milliseconds. 0 disables the timeout.
+  # Individual commands can override this with timeout:<ms>.
+  query_timeout_ms: 0
+
+  # Queries slower than this are counted and fire 'db slow query'.
+  # Set to 0 to disable slow-query tracking.
+  slow_query_ms: 500
+
+  # When false, obviously destructive statements (DROP, TRUNCATE, DELETE/UPDATE
+  # without WHERE, multi-statement SQL) are rejected by db_execute.
+  # Commands can opt in with allow_unsafe:true.
+  allow_unsafe_queries: true
+
+  # When true, file paths used by import/export/backup/migrate are restricted
+  # to the Datenizen data folder. Absolute paths outside it are rejected.
+  sandbox_paths: false
+
+  # Automatically clear db_cached_query entries after successful writes.
+  cache_invalidate_on_write: true
+
+  # Log every query to the server console. Useful for debugging, noisy otherwise.
+  log_queries: false
+
+  # Store and verify SHA-256 checksums for applied migration files.
+  migration_checksums: true
+
+  # JDBC fetch size for query tags. 0 uses the driver default.
+  fetch_size: 0

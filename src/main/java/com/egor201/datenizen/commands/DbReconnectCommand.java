@@ -9,7 +9,7 @@ import com.egor201.datenizen.events.DbConnectedEvent;
 import com.egor201.datenizen.events.DbErrorEvent;
 import org.bukkit.Bukkit;
 
-public class DbReconnectCommand extends AbstractCommand {
+public class DbReconnectCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_reconnect
@@ -31,18 +31,8 @@ public class DbReconnectCommand extends AbstractCommand {
     // -->
 
     public DbReconnectCommand() {
-        setName("db_reconnect");
-        setSyntax("db_reconnect [id:<id>]");
-        setRequiredArguments(1, 1);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id")) throw new InvalidArgumentsException("Must specify id!");
+        super("db_reconnect", "db_reconnect [id:<id>]", 1, 1, "Must specify id!",
+              ArgSpec.element("id"));
     }
 
     @Override

@@ -13,7 +13,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbCreateIndexCommand extends AbstractCommand {
+public class DbCreateIndexCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_create_index
@@ -31,26 +31,18 @@ public class DbCreateIndexCommand extends AbstractCommand {
     // - db_create_index id:main table:players name:idx_players_uuid column:uuid unique:true
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbCreateIndexCommand() {
-        setName("db_create_index");
-        setSyntax("db_create_index [id:<id>] [table:<table>] [name:<index_name>] [column:<column>] (unique:true/false)");
-        setRequiredArguments(4, 5);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("table") && arg.matchesPrefix("table")) se.addObject("table", arg.asElement());
-            else if (!se.hasObject("name") && arg.matchesPrefix("name")) se.addObject("name", arg.asElement());
-            else if (!se.hasObject("column") && arg.matchesPrefix("column")) se.addObject("column", arg.asElement());
-            else if (!se.hasObject("unique") && arg.matchesPrefix("unique")) se.addObject("unique", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("table") || !se.hasObject("name") || !se.hasObject("column"))
-            throw new InvalidArgumentsException("Must specify id, table, name, and column!");
+        super("db_create_index",
+              "db_create_index [id:<id>] [table:<table>] [name:<index_name>] [column:<column>] (unique:true/false)",
+              4, 5,
+              "Must specify id, table, name, and column!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.element("name"),
+              ArgSpec.element("column"),
+              ArgSpec.optionalElement("unique"));
     }
 
     @Override

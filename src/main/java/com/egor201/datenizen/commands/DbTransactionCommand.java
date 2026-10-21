@@ -9,7 +9,7 @@ import com.egor201.datenizen.Datenizen;
 import com.egor201.datenizen.events.DbErrorEvent;
 import org.bukkit.Bukkit;
 
-public class DbTransactionCommand extends AbstractCommand {
+public class DbTransactionCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_transaction
@@ -25,32 +25,17 @@ public class DbTransactionCommand extends AbstractCommand {
     // Savepoint names must be alphanumeric/underscores only.
     // -->
 
-    private static final java.util.regex.Pattern SAFE_NAME = java.util.regex.Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final java.util.regex.Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbTransactionCommand() {
-        setName("db_transaction");
-        setSyntax("db_transaction [id:<id>] [action:start/commit/rollback/savepoint/rollback_to/release] [tx:<tx_id>] (savepoint:<name>)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("action") && arg.matchesPrefix("action")) {
-                scriptEntry.addObject("action", arg.asElement());
-            } else if (!scriptEntry.hasObject("tx") && arg.matchesPrefix("tx")) {
-                scriptEntry.addObject("tx", arg.asElement());
-            } else if (!scriptEntry.hasObject("savepoint") && arg.matchesPrefix("savepoint")) {
-                scriptEntry.addObject("savepoint", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("action") || !scriptEntry.hasObject("tx")) {
-            throw new InvalidArgumentsException("Must specify action and tx!");
-        }
+        super("db_transaction",
+              "db_transaction [id:<id>] [action:start/commit/rollback/savepoint/rollback_to/release] [tx:<tx_id>] (savepoint:<name>)",
+              3, 4,
+              "Must specify action and tx!",
+              ArgSpec.optionalElement("id"),
+              ArgSpec.element("action"),
+              ArgSpec.element("tx"),
+              ArgSpec.optionalElement("savepoint"));
     }
 
     @Override

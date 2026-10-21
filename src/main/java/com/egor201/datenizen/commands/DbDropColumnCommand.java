@@ -13,7 +13,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbDropColumnCommand extends AbstractCommand {
+public class DbDropColumnCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_drop_column
@@ -32,24 +32,14 @@ public class DbDropColumnCommand extends AbstractCommand {
     // - db_drop_column id:main table:players column:old_field
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbDropColumnCommand() {
-        setName("db_drop_column");
-        setSyntax("db_drop_column [id:<id>] [table:<table>] [column:<column>]");
-        setRequiredArguments(3, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("table") && arg.matchesPrefix("table")) se.addObject("table", arg.asElement());
-            else if (!se.hasObject("column") && arg.matchesPrefix("column")) se.addObject("column", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("table") || !se.hasObject("column"))
-            throw new InvalidArgumentsException("Must specify id, table, and column!");
+        super("db_drop_column",
+              "db_drop_column [id:<id>] [table:<table>] [column:<column>]",
+              3, 3,
+              "Must specify id, table, and column!",
+              ArgSpec.element("id"), ArgSpec.element("table"), ArgSpec.element("column"));
     }
 
     @Override

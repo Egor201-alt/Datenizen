@@ -9,7 +9,7 @@ import com.egor201.datenizen.events.DbErrorEvent;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit;
 
-public class DbTimeoutCommand extends AbstractCommand {
+public class DbTimeoutCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_timeout
@@ -24,25 +24,8 @@ public class DbTimeoutCommand extends AbstractCommand {
     // -->
 
     public DbTimeoutCommand() {
-        setName("db_timeout");
-        setSyntax("db_timeout [id:<id>] [ms:<int>]");
-        setRequiredArguments(2, 2);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("ms") && arg.matchesPrefix("ms")) {
-                se.addObject("ms", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("ms")) {
-            throw new InvalidArgumentsException("Must specify id and ms!");
-        }
+        super("db_timeout", "db_timeout [id:<id>] [ms:<int>]", 2, 2, "Must specify id and ms!",
+              ArgSpec.element("id"), ArgSpec.element("ms"));
     }
 
     @Override

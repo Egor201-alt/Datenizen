@@ -1,17 +1,17 @@
 package com.egor201.datenizen.commands;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
-import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
-import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
-import com.egor201.datenizen.events.DbErrorEvent;
+import com.egor201.datenizen.Settings;
+import com.egor201.datenizen.database.DatabaseManager;
+import com.egor201.datenizen.database.ResultMapper;
 import com.egor201.datenizen.events.DbJsonExportedEvent;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonNull;
+import com.egor201.datenizen.util.NamedParams;
+import com.egor201.datenizen.util.SqlUtils;
 import com.google.gson.JsonObject;
-import org.bukkit.Bukkit;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -21,20 +21,19 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 
-public class DbExportJsonCommand extends AbstractCommand {
+public class DbExportJsonCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_export_json
-    // @Syntax db_export_json [id:<id>] [sql:<query>] [path:<path>] (args:<list>)
+    // @Syntax db_export_json [id:<id>] [sql:<query>] [path:<path>] (args:<list>) (named_args:<map>) (timeout:<ms>)
     // @Required 3
-    // @Maximum 4
+    // @Maximum 6
     // @Short Exports a query result to a JSON file.
     // @Group Datenizen
     //
     // @Description
-    // Runs a SELECT query asynchronously and writes the result as a JSON array to a file (UTF-8).
+    // Runs a SELECT query asynchronously and streams the result as a JSON array (UTF-8).
     // Null database values are written as JSON null (not the string "null").
     // Parent directories are created automatically.
     // Fires 'db json exported' on success with <context.id> and <context.path>.
@@ -42,77 +41,89 @@ public class DbExportJsonCommand extends AbstractCommand {
     // @Usage
     // - db_export_json id:main sql:"SELECT * FROM players" path:plugins/Datenizen/exports/players.json
     // -->
-
     public DbExportJsonCommand() {
-        setName("db_export_json");
-        setSyntax("db_export_json [id:<id>] [sql:<query>] [path:<path>] (args:<list>)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("sql") && arg.matchesPrefix("sql")) se.addObject("sql", arg.asElement());
-            else if (!se.hasObject("path") && arg.matchesPrefix("path")) se.addObject("path", arg.asElement());
-            else if (!se.hasObject("args") && arg.matchesPrefix("args")) se.addObject("args", arg.asType(ListTag.class));
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("sql") || !se.hasObject("path"))
-            throw new InvalidArgumentsException("Must specify id, sql, and path!");
+        super("db_export_json",
+              "db_export_json [id:<id>] [sql:<query>] [path:<path>] (args:<list>) (named_args:<map>) (timeout:<ms>)",
+              3, 6,
+              "Must specify id, sql, and path!",
+              ArgSpec.element("id"),
+              ArgSpec.element("sql"),
+              ArgSpec.element("path"),
+              ArgSpec.optionalList("args"),
+              ArgSpec.optionalMap("named_args"),
+              ArgSpec.optionalElement("timeout"));
     }
 
     @Override
     public void execute(ScriptEntry se) {
-        String id    = se.getElement("id").asString();
-        String sql   = se.getElement("sql").asString();
-        String path  = se.getElement("path").asString();
+        String id = se.getElement("id").asString();
+        String sql = se.getElement("sql").asString();
+        String path = se.getElement("path").asString();
         ListTag args = se.getObjectTag("args");
+        MapTag namedArgs = se.getObjectTag("named_args");
+        ElementTag timeoutTag = se.getElement("timeout");
 
-        Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            File outputFile = new File(path);
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_export_json");
+                return;
+            }
+        }
+        final long finalTimeout = timeoutMs;
+
+        NamedParams.Bound bound;
+        try {
+            bound = NamedParams.bind(sql, namedArgs);
+        } catch (IllegalArgumentException e) {
+            DbCommandSupport.error(id, e.getMessage(), "db_export_json");
+            return;
+        }
+
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
+            File outputFile = Settings.resolvePath(path);
             if (outputFile.getParentFile() != null) outputFile.getParentFile().mkdirs();
 
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
+            long start = System.nanoTime();
+            try (Connection conn = manager.getConnection(id);
+                 PreparedStatement ps = conn.prepareStatement(bound.sql())) {
 
-                if (args != null) {
-                    for (int i = 0; i < args.size(); i++) ps.setObject(i + 1, args.get(i));
+                DbCommandSupport.applySettings(ps, finalTimeout);
+                if (!bound.values().isEmpty()) {
+                    ResultMapper.bindValues(ps, bound.values());
+                } else {
+                    ResultMapper.bind(ps, args);
                 }
+                DbCommandSupport.log(bound.sql());
 
                 try (ResultSet rs = ps.executeQuery();
                      BufferedWriter writer = new BufferedWriter(
-                             new OutputStreamWriter(new FileOutputStream(outputFile), StandardCharsets.UTF_8))) {
+                         new OutputStreamWriter(new FileOutputStream(outputFile), StandardCharsets.UTF_8))) {
 
-                    ResultSetMetaData meta = rs.getMetaData();
-                    int cols = meta.getColumnCount();
-                    JsonArray arr = new JsonArray();
-
+                    writer.write('[');
+                    boolean first = true;
                     while (rs.next()) {
-                        JsonObject obj = new JsonObject();
-                        for (int i = 1; i <= cols; i++) {
-                            String colName = meta.getColumnName(i);
-                            String val = rs.getString(i);
-                            if (val == null) obj.add(colName, JsonNull.INSTANCE);
-                            else obj.addProperty(colName, val);
-                        }
-                        arr.add(obj);
+                        if (!first) writer.write(',');
+                        JsonObject object = ResultMapper.jsonObject(rs);
+                        writer.write(object.toString());
+                        first = false;
                     }
-
-                    writer.write(arr.toString());
-                    Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                        DbJsonExportedEvent.instance.fireFor(id, path)
-                    );
+                    writer.write(']');
+                    writer.flush();
                 }
-            } catch (java.sql.SQLException e) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
+
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, true, bound.sql());
+                org.bukkit.Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                    DbJsonExportedEvent.instance.fireFor(id, path)
                 );
             } catch (Exception e) {
-                e.printStackTrace();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, sql)
-                );
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, false, bound.sql());
+                manager.recordError(id, e, bound.sql());
+                DbCommandSupport.error(id, e, bound.sql());
             }
         });
     }

@@ -18,7 +18,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.List;
 
-public class DbExecuteScriptCommand extends AbstractCommand {
+public class DbExecuteScriptCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_execute_script
@@ -36,25 +36,9 @@ public class DbExecuteScriptCommand extends AbstractCommand {
     // -->
 
     public DbExecuteScriptCommand() {
-        setName("db_execute_script");
-        setSyntax("db_execute_script [id:<id>] [path:<path>]");
-        setRequiredArguments(2, 2);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("path") && arg.matchesPrefix("path")) {
-                se.addObject("path", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("path")) {
-            throw new InvalidArgumentsException("Must specify id and path!");
-        }
+        super("db_execute_script", "db_execute_script [id:<id>] [path:<path>]", 2, 2,
+              "Must specify id and path!",
+              ArgSpec.element("id"), ArgSpec.element("path"));
     }
 
     @Override

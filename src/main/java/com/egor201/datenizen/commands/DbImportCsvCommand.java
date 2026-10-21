@@ -20,7 +20,7 @@ import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class DbImportCsvCommand extends AbstractCommand {
+public class DbImportCsvCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_import_csv
@@ -33,36 +33,18 @@ public class DbImportCsvCommand extends AbstractCommand {
     // @Description
     // Reads a CSV file asynchronously and inserts rows into the specified table using a transaction.
     // If any row fails the entire import is rolled back.
-    // The first line of the file is treated as the header and skipped.
+    // The first line of the file is treated as the header and used as the INSERT column list.
     // Supports quoted fields containing commas and escaped quotes.
-    // Table name must be alphanumeric/underscores only.
+    // Table and column names must be alphanumeric/underscores only.
     // If a CSV row has fewer columns than the header, missing values are inserted as NULL.
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbImportCsvCommand() {
-        setName("db_import_csv");
-        setSyntax("db_import_csv [id:<id>] [table:<table>] [path:<path>]");
-        setRequiredArguments(3, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("table") && arg.matchesPrefix("table")) {
-                scriptEntry.addObject("table", arg.asElement());
-            } else if (!scriptEntry.hasObject("path") && arg.matchesPrefix("path")) {
-                scriptEntry.addObject("path", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("table") || !scriptEntry.hasObject("path")) {
-            throw new InvalidArgumentsException("Must specify id, table, and path!");
-        }
+        super("db_import_csv", "db_import_csv [id:<id>] [table:<table>] [path:<path>]", 3, 3,
+              "Must specify id, table, and path!",
+              ArgSpec.element("id"), ArgSpec.element("table"), ArgSpec.element("path"));
     }
 
     @Override
@@ -78,7 +60,7 @@ public class DbImportCsvCommand extends AbstractCommand {
             return;
         }
 
-        File file = new File(path);
+        File file = com.egor201.datenizen.Settings.resolvePath(path);
         if (!file.exists()) return;
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
@@ -92,17 +74,31 @@ public class DbImportCsvCommand extends AbstractCommand {
 
                     String headerLine = reader.readLine();
                     if (headerLine == null) return;
+                    if (headerLine.startsWith("\uFEFF")) headerLine = headerLine.substring(1);
 
                     List<String> headers = SqlUtils.parseCsvLine(headerLine);
                     int columnCount = headers.size();
 
+                    StringBuilder columnNames = new StringBuilder();
                     StringBuilder placeholders = new StringBuilder();
                     for (int i = 0; i < columnCount; i++) {
+                        String column = headers.get(i).trim();
+                        if (!SAFE_NAME.matcher(column).matches()) {
+                            final String invalidColumn = column;
+                            Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                                DbErrorEvent.instance.fireFor(id, "Invalid CSV column name: " + invalidColumn, null, "CSV IMPORT " + table)
+                            );
+                            return;
+                        }
+                        if (i > 0) {
+                            columnNames.append(",");
+                            placeholders.append(",");
+                        }
+                        columnNames.append(column);
                         placeholders.append("?");
-                        if (i < columnCount - 1) placeholders.append(",");
                     }
 
-                    String sql = "INSERT INTO " + table + " VALUES (" + placeholders + ")";
+                    String sql = "INSERT INTO " + table + " (" + columnNames + ") VALUES (" + placeholders + ")";
                     int rowsCount = 0;
 
                     try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -142,7 +138,8 @@ public class DbImportCsvCommand extends AbstractCommand {
                 );
             } finally {
                 if (conn != null) {
-                    try { conn.setAutoCommit(true); conn.close(); } catch (Exception ignored) {}
+                    try { conn.setAutoCommit(true); } catch (Exception ignored) {}
+                    try { conn.close(); } catch (Exception ignored) {}
                 }
             }
         });

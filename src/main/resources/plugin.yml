@@ -5,3 +5,14 @@ api-version: '1.21'
 depend: [Denizen]
 description: The ultimate Universal Database Addon for Denizen scripts.
 authors: [egor201]
+
+commands:
+  datenizen:
+    description: Datenizen administration command.
+    usage: /datenizen <status|pools|test|tables|query|reload>
+    permission: datenizen.admin
+
+permissions:
+  datenizen.admin:
+    description: Allows use of the /datenizen administration command.
+    default: op
