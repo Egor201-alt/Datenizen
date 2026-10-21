@@ -6,7 +6,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
 
-public class DbClearCacheCommand extends AbstractCommand {
+public class DbClearCacheCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_clear_cache
@@ -18,18 +18,8 @@ public class DbClearCacheCommand extends AbstractCommand {
     // -->
 
     public DbClearCacheCommand() {
-        setName("db_clear_cache");
-        setSyntax("db_clear_cache [id:<id>]");
-        setRequiredArguments(1, 1);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id")) throw new InvalidArgumentsException("Must specify id!");
+        super("db_clear_cache", "db_clear_cache [id:<id>]", 1, 1, "Must specify id!",
+              ArgSpec.element("id"));
     }
 
     @Override

@@ -2,12 +2,16 @@ package com.egor201.datenizen;
 
 import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.events.ScriptEvent;
+import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
+import com.egor201.datenizen.admin.DatenizenAdminCommand;
 import com.egor201.datenizen.commands.*;
 import com.egor201.datenizen.database.DatabaseManager;
 import com.egor201.datenizen.events.*;
 import com.egor201.datenizen.tags.DatenizenTags;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.List;
 
 public final class Datenizen extends JavaPlugin {
 
@@ -24,46 +28,64 @@ public final class Datenizen extends JavaPlugin {
             return;
         }
 
+        saveDefaultConfig();
+        Settings.load();
+
         databaseManager = new DatabaseManager();
 
-        DenizenCore.commandRegistry.registerCommand(DbConnectCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbReconnectCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbDisconnectCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteSyncCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteAsyncListCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteBatchCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteScriptCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTransactionCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbBackupCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbImportCsvCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExportCsvCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbDropTableCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTableCreateCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTableInsertCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTableUpdateCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTableDeleteCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbUpsertCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbSetPoolSizeCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTimeoutCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbCleanPoolCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbAnalyzeCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbQueryAsyncCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbRegisterCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbRunCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbMigrateCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbUpsertBatchCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbConnectFileCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbTableCopyCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbClearCacheCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbAddColumnCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbDropColumnCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbRenameTableCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbCreateIndexCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbDropIndexCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExecuteIfCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbExportJsonCommand.class);
-        DenizenCore.commandRegistry.registerCommand(DbListenCommand.class);
+        List<Class<? extends AbstractCommand>> commands = List.of(
+            DbConnectCommand.class,
+            DbReconnectCommand.class,
+            DbDisconnectCommand.class,
+            DbExecuteCommand.class,
+            DbExecuteSyncCommand.class,
+            DbExecuteAsyncListCommand.class,
+            DbExecuteBatchCommand.class,
+            DbExecuteScriptCommand.class,
+            DbTransactionCommand.class,
+            DbBackupCommand.class,
+            DbImportCsvCommand.class,
+            DbExportCsvCommand.class,
+            DbDropTableCommand.class,
+            DbTableCreateCommand.class,
+            DbTableInsertCommand.class,
+            DbTableUpdateCommand.class,
+            DbTableDeleteCommand.class,
+            DbUpsertCommand.class,
+            DbSetPoolSizeCommand.class,
+            DbTimeoutCommand.class,
+            DbCleanPoolCommand.class,
+            DbAnalyzeCommand.class,
+            DbQueryAsyncCommand.class,
+            DbRegisterCommand.class,
+            DbRunCommand.class,
+            DbMigrateCommand.class,
+            DbUpsertBatchCommand.class,
+            DbConnectFileCommand.class,
+            DbTableCopyCommand.class,
+            DbClearCacheCommand.class,
+            DbAddColumnCommand.class,
+            DbDropColumnCommand.class,
+            DbRenameTableCommand.class,
+            DbCreateIndexCommand.class,
+            DbDropIndexCommand.class,
+            DbExecuteIfCommand.class,
+            DbExportJsonCommand.class,
+            DbListenCommand.class,
+            DbTableSelectCommand.class,
+            DbTableCountCommand.class,
+            DbTableInsertBatchCommand.class,
+            DbTruncateCommand.class,
+            DbRenameColumnCommand.class,
+            DbExportJsonlCommand.class,
+            DbImportJsonCommand.class,
+            DbKvSetCommand.class,
+            DbKvDeleteCommand.class,
+            DbCooldownCommand.class
+        );
+        for (Class<? extends AbstractCommand> command : commands) {
+            DenizenCore.commandRegistry.registerCommand(command);
+        }
 
         ScriptEvent.registerScriptEvent(new DbConnectedEvent());
         ScriptEvent.registerScriptEvent(new DbDisconnectedEvent());
@@ -78,8 +100,15 @@ public final class Datenizen extends JavaPlugin {
         ScriptEvent.registerScriptEvent(new DbMigratedEvent());
         ScriptEvent.registerScriptEvent(new DbJsonExportedEvent());
         ScriptEvent.registerScriptEvent(new DbNotifyEvent());
+        ScriptEvent.registerScriptEvent(new DbSlowQueryEvent());
 
         DatenizenTags.register();
+
+        if (getCommand("datenizen") != null) {
+            DatenizenAdminCommand adminCommand = new DatenizenAdminCommand();
+            getCommand("datenizen").setExecutor(adminCommand);
+            getCommand("datenizen").setTabCompleter(adminCommand);
+        }
 
         getLogger().info("Datenizen enabled successfully.");
     }

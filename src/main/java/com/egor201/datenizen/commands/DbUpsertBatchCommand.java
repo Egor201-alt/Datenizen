@@ -19,20 +19,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class DbUpsertBatchCommand extends AbstractCommand {
+public class DbUpsertBatchCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_upsert_batch
-    // @Syntax db_upsert_batch [id:<id>] [table:<table>] [key_column:<col>] [rows:<list>] (label:<label>)
+    // @Syntax db_upsert_batch [id:<id>] [table:<table>] [key_column:<col>] [rows:<list>] (timeout:<ms>) (label:<label>)
     // @Required 4
-    // @Maximum 5
+    // @Maximum 6
     // @Short Upserts multiple rows in a single batched statement.
     // @Group Datenizen
     //
     // @Description
     // Accepts a ListTag of MapTags, each representing one row.
     // All rows must contain the key_column. Column names and table name must be alphanumeric/underscores only.
-    // Uses INSERT OR REPLACE / ON DUPLICATE KEY UPDATE / ON CONFLICT DO UPDATE SET by database type.
+    // Uses ON CONFLICT ... DO UPDATE (SQLite/PostgreSQL) or ON DUPLICATE KEY UPDATE (MySQL/MariaDB).
     // Runs in a transaction; rolled back entirely on failure.
     // Fires 'db executed' with total affected rows on success.
     //
@@ -40,34 +40,19 @@ public class DbUpsertBatchCommand extends AbstractCommand {
     // - db_upsert_batch id:main table:players key_column:uuid rows:<list[<map[uuid=abc|coins=0]>|<map[uuid=def|coins=5]>]> label:bulk_save
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbUpsertBatchCommand() {
-        setName("db_upsert_batch");
-        setSyntax("db_upsert_batch [id:<id>] [table:<table>] [key_column:<col>] [rows:<list>] (label:<label>)");
-        setRequiredArguments(4, 5);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("table") && arg.matchesPrefix("table")) {
-                se.addObject("table", arg.asElement());
-            } else if (!se.hasObject("key_column") && arg.matchesPrefix("key_column")) {
-                se.addObject("key_column", arg.asElement());
-            } else if (!se.hasObject("rows") && arg.matchesPrefix("rows")) {
-                se.addObject("rows", arg.asType(ListTag.class));
-            } else if (!se.hasObject("label") && arg.matchesPrefix("label")) {
-                se.addObject("label", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("table") || !se.hasObject("key_column") || !se.hasObject("rows")) {
-            throw new InvalidArgumentsException("Must specify id, table, key_column, and rows!");
-        }
+        super("db_upsert_batch",
+              "db_upsert_batch [id:<id>] [table:<table>] [key_column:<col>] [rows:<list>] (timeout:<ms>) (label:<label>)",
+              4, 6,
+              "Must specify id, table, key_column, and rows!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.element("key_column"),
+              ArgSpec.list("rows"),
+              ArgSpec.optionalElement("timeout"),
+              ArgSpec.optionalElement("label"));
     }
 
     private String buildSql(String dbType, String table, String keyCol, List<String> cols) {
@@ -80,7 +65,7 @@ public class DbUpsertBatchCommand extends AbstractCommand {
             placeholders.append(",?");
             if (i > 0) updatePart.append(",");
             updatePart.append(cols.get(i));
-            if (dbType.equals("postgresql")) {
+            if (dbType.equals("postgresql") || dbType.equals("sqlite")) {
                 updatePart.append("=EXCLUDED.").append(cols.get(i));
             } else {
                 updatePart.append("=?");
@@ -88,9 +73,7 @@ public class DbUpsertBatchCommand extends AbstractCommand {
         }
 
         return switch (dbType) {
-            case "sqlite" ->
-                "INSERT OR REPLACE INTO " + table + " (" + colsPart + ") VALUES (" + placeholders + ")";
-            case "postgresql" ->
+            case "sqlite", "postgresql" ->
                 "INSERT INTO " + table + " (" + colsPart + ") VALUES (" + placeholders + ")" +
                 " ON CONFLICT (" + keyCol + ") DO UPDATE SET " + updatePart;
             default ->
@@ -105,7 +88,18 @@ public class DbUpsertBatchCommand extends AbstractCommand {
         String table  = se.getElement("table").asString();
         String keyCol = se.getElement("key_column").asString();
         ListTag rows  = se.getObjectTag("rows");
+        com.denizenscript.denizencore.objects.core.ElementTag timeoutTag = se.getElement("timeout");
         String label  = se.hasObject("label") ? se.getElement("label").asString() : null;
+
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = com.egor201.datenizen.util.SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_upsert_batch");
+                return;
+            }
+        }
+        final long finalTimeout = timeoutMs;
 
         if (!SAFE_NAME.matcher(table).matches() || !SAFE_NAME.matcher(keyCol).matches()) {
             Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
@@ -171,26 +165,29 @@ public class DbUpsertBatchCommand extends AbstractCommand {
         final List<String> finalCols = cols;
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            String dbType = Datenizen.getInstance().getDatabaseManager().getDatabaseType(id);
+            com.egor201.datenizen.database.DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
+            String dbType = manager.getDatabaseType(id);
             String sql = buildSql(dbType, table, keyCol, finalCols);
+            long start = System.nanoTime();
             Connection conn = null;
             try {
-                conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
+                conn = manager.getConnection(id);
                 conn.setAutoCommit(false);
 
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    DbCommandSupport.applySettings(ps, finalTimeout);
                     for (MapTag row : parsedRows) {
                         int idx = 1;
                         ObjectTag kv = row.map.get(keyHolder);
-                        ps.setObject(idx++, kv != null ? kv.toString() : null);
+                        ps.setString(idx++, kv != null ? kv.toString() : null);
                         for (String col : finalCols) {
                             ObjectTag cv = row.map.get(new StringHolder(col));
-                            ps.setObject(idx++, cv != null ? cv.toString() : null);
+                            ps.setString(idx++, cv != null ? cv.toString() : null);
                         }
                         if (dbType.equals("mysql") || dbType.equals("mariadb")) {
                             for (String col : finalCols) {
                                 ObjectTag cv = row.map.get(new StringHolder(col));
-                                ps.setObject(idx++, cv != null ? cv.toString() : null);
+                                ps.setString(idx++, cv != null ? cv.toString() : null);
                             }
                         }
                         ps.addBatch();
@@ -201,25 +198,21 @@ public class DbUpsertBatchCommand extends AbstractCommand {
 
                     int total = 0;
                     for (int r : results) if (r > 0) total += r;
-                    final int totalAffected = total;
-                    Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                        DbExecutedEvent.instance.fireFor(id, label, totalAffected)
-                    );
+                    manager.afterWrite(id);
+                    long duration = DbCommandSupport.elapsedMs(start);
+                    manager.recordQuery(id, duration, true, sql);
+                    DbCommandSupport.executed(id, label, total, null, duration);
                 }
-            } catch (java.sql.SQLException e) {
-                if (conn != null) { try { conn.rollback(); } catch (Exception ignored) {} }
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
-                );
             } catch (Exception e) {
-                e.printStackTrace();
                 if (conn != null) { try { conn.rollback(); } catch (Exception ignored) {} }
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, sql)
-                );
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, false, sql);
+                manager.recordError(id, e, sql);
+                DbCommandSupport.error(id, e, sql);
             } finally {
                 if (conn != null) {
-                    try { conn.setAutoCommit(true); conn.close(); } catch (Exception ignored) {}
+                    try { conn.setAutoCommit(true); } catch (Exception ignored) {}
+                    try { conn.close(); } catch (Exception ignored) {}
                 }
             }
         });

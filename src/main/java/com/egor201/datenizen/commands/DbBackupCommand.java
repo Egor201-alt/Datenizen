@@ -1,20 +1,18 @@
 package com.egor201.datenizen.commands;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
-import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
-import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
+import com.egor201.datenizen.Settings;
 import com.egor201.datenizen.events.DbBackedUpEvent;
 import com.egor201.datenizen.events.DbErrorEvent;
 import com.zaxxer.hikari.HikariDataSource;
-import org.bukkit.Bukkit;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import java.sql.Connection;
+import java.sql.Statement;
 
-public class DbBackupCommand extends AbstractCommand {
+public class DbBackupCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_backup
@@ -25,35 +23,19 @@ public class DbBackupCommand extends AbstractCommand {
     // @Group Datenizen
     //
     // @Description
-    // Copies the SQLite file to a new location asynchronously.
+    // Uses SQLite VACUUM INTO to create a consistent copy without stopping the server.
+    // The target file is replaced if it already exists.
+    // For non-SQLite databases use the database engine's native backup tool.
     // -->
-
     public DbBackupCommand() {
-        setName("db_backup");
-        setSyntax("db_backup [id:<id>] [path:<path>]");
-        setRequiredArguments(2, 2);
+        super("db_backup", "db_backup [id:<id>] [path:<path>]", 2, 2, "Must specify id and path!",
+              ArgSpec.element("id"), ArgSpec.element("path"));
     }
 
     @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("path") && arg.matchesPrefix("path")) {
-                scriptEntry.addObject("path", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("path")) {
-            throw new InvalidArgumentsException("Must specify id and path!");
-        }
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
-        String id = scriptEntry.getElement("id").asString();
-        String path = scriptEntry.getElement("path").asString();
+    public void execute(ScriptEntry se) {
+        String id = se.getElement("id").asString();
+        String path = se.getElement("path").asString();
 
         HikariDataSource ds = Datenizen.getInstance().getDatabaseManager().getDataSource(id);
         if (ds == null) return;
@@ -64,26 +46,35 @@ public class DbBackupCommand extends AbstractCommand {
             return;
         }
 
-        String sourceFile = url.replace("jdbc:sqlite:", "");
-
-        Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
             try {
-                File source = new File(sourceFile);
-                File target = new File(path);
-
+                File target = Settings.resolvePath(path);
+                String sourcePath = url.substring("jdbc:sqlite:".length());
+                int queryStart = sourcePath.indexOf('?');
+                if (queryStart >= 0) sourcePath = sourcePath.substring(0, queryStart);
+                File source = new File(sourcePath);
+                if (target.getCanonicalFile().equals(source.getCanonicalFile())) {
+                    DbCommandSupport.error(id, "Backup path must not be the database file itself", "db_backup");
+                    return;
+                }
                 if (target.getParentFile() != null) {
                     target.getParentFile().mkdirs();
                 }
+                Files.deleteIfExists(target.toPath());
 
-                Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
+                String escaped = target.getAbsolutePath().replace("'", "''");
+                String sql = "VACUUM INTO '" + escaped + "'";
+                try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
+                     Statement st = conn.createStatement()) {
+                    st.execute(sql);
+                }
+
+                org.bukkit.Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
                     DbBackedUpEvent.instance.fireFor(id, path)
                 );
             } catch (Exception e) {
                 e.printStackTrace();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, "db_backup")
-                );
+                DbCommandSupport.error(id, e, "db_backup");
             }
         });
     }

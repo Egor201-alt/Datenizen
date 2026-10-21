@@ -9,7 +9,7 @@ import com.egor201.datenizen.events.DbErrorEvent;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit;
 
-public class DbSetPoolSizeCommand extends AbstractCommand {
+public class DbSetPoolSizeCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_set_pool_size
@@ -25,25 +25,9 @@ public class DbSetPoolSizeCommand extends AbstractCommand {
     // -->
 
     public DbSetPoolSizeCommand() {
-        setName("db_set_pool_size");
-        setSyntax("db_set_pool_size [id:<id>] [size:<int>]");
-        setRequiredArguments(2, 2);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("size") && arg.matchesPrefix("size")) {
-                scriptEntry.addObject("size", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("size")) {
-            throw new InvalidArgumentsException("Must specify id and size!");
-        }
+        super("db_set_pool_size", "db_set_pool_size [id:<id>] [size:<int>]", 2, 2,
+              "Must specify id and size!",
+              ArgSpec.element("id"), ArgSpec.element("size"));
     }
 
     @Override

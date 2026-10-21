@@ -24,12 +24,14 @@ public class DbQueriedEvent extends ScriptEvent {
     // <context.id> returns the database ID.
     // <context.label> returns the label passed to the command, or empty if not set.
     // <context.rows> returns a ListTag of MapTags with the query results.
+    // <context.duration_ms> returns how long the query took in milliseconds.
     // -->
 
     public static DbQueriedEvent instance;
     private ElementTag id;
     private ElementTag label;
     private ListTag rows;
+    private ElementTag durationMs;
 
     public DbQueriedEvent() {
         instance = this;
@@ -50,14 +52,20 @@ public class DbQueriedEvent extends ScriptEvent {
             case "id"    -> id;
             case "label" -> label;
             case "rows"  -> rows;
+            case "duration_ms" -> durationMs;
             default      -> super.getContext(name);
         };
     }
 
     public void fireFor(String id, String label, ListTag rows) {
+        fireFor(id, label, rows, 0L);
+    }
+
+    public void fireFor(String id, String label, ListTag rows, long durationMs) {
         this.id    = new ElementTag(id);
         this.label = new ElementTag(label != null ? label : "");
         this.rows  = rows != null ? rows : new ListTag();
+        this.durationMs = new ElementTag(durationMs);
         fire();
     }
 }

@@ -10,9 +10,9 @@ import org.bukkit.Bukkit;
 
 import java.util.regex.Pattern;
 
-public class DbListenCommand extends AbstractCommand {
+public class DbListenCommand extends AbstractDbCommand {
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     // <--[command]
     // @Name db_listen
@@ -35,21 +35,13 @@ public class DbListenCommand extends AbstractCommand {
     // -->
 
     public DbListenCommand() {
-        setName("db_listen");
-        setSyntax("db_listen [id:<id>] [channel:<channel>] [action:<start|stop>]");
-        setRequiredArguments(3, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) se.addObject("id", arg.asElement());
-            else if (!se.hasObject("channel") && arg.matchesPrefix("channel")) se.addObject("channel", arg.asElement());
-            else if (!se.hasObject("action") && arg.matchesPrefix("action")) se.addObject("action", arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("channel") || !se.hasObject("action"))
-            throw new InvalidArgumentsException("Must specify id, channel, and action!");
+        super("db_listen",
+              "db_listen [id:<id>] [channel:<channel>] [action:<start|stop>]",
+              3, 3,
+              "Must specify id, channel, and action!",
+              ArgSpec.element("id"),
+              ArgSpec.element("channel"),
+              ArgSpec.element("action"));
     }
 
     @Override

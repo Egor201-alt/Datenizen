@@ -2,6 +2,7 @@ package com.egor201.datenizen.commands;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
@@ -16,13 +17,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class DbTableUpdateCommand extends AbstractCommand {
+public class DbTableUpdateCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_table_update
-    // @Syntax db_table_update [id:<id>] [table:<table>] [set:<list>] [where:<list>] (label:<label>)
+    // @Syntax db_table_update [id:<id>] [table:<table>] [set:<list>] [where:<list>] (timeout:<ms>) (label:<label>)
     // @Required 4
-    // @Maximum 5
+    // @Maximum 6
     // @Short Updates rows in a table without writing SQL manually.
     // @Group Datenizen
     //
@@ -37,35 +38,19 @@ public class DbTableUpdateCommand extends AbstractCommand {
     // - db_table_update id:main table:players set:<list[score=100|rank=gold]> where:<list[uuid=abc-123]> label:update_score
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbTableUpdateCommand() {
-        setName("db_table_update");
-        setSyntax("db_table_update [id:<id>] [table:<table>] [set:<list>] [where:<list>] (label:<label>)");
-        setRequiredArguments(4, 5);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("table") && arg.matchesPrefix("table")) {
-                scriptEntry.addObject("table", arg.asElement());
-            } else if (!scriptEntry.hasObject("set") && arg.matchesPrefix("set")) {
-                scriptEntry.addObject("set", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("where") && arg.matchesPrefix("where")) {
-                scriptEntry.addObject("where", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("label") && arg.matchesPrefix("label")) {
-                scriptEntry.addObject("label", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("table")
-                || !scriptEntry.hasObject("set") || !scriptEntry.hasObject("where")) {
-            throw new InvalidArgumentsException("Must specify id, table, set, and where!");
-        }
+        super("db_table_update",
+              "db_table_update [id:<id>] [table:<table>] [set:<list>] [where:<list>] (timeout:<ms>) (label:<label>)",
+              4, 6,
+              "Must specify id, table, set, and where!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.list("set"),
+              ArgSpec.list("where"),
+              ArgSpec.optionalElement("timeout"),
+              ArgSpec.optionalElement("label"));
     }
 
     private record Pair(String col, String val) {}
@@ -89,7 +74,18 @@ public class DbTableUpdateCommand extends AbstractCommand {
         String table = scriptEntry.getElement("table").asString();
         ListTag setList = scriptEntry.getObjectTag("set");
         ListTag whereList = scriptEntry.getObjectTag("where");
+        ElementTag timeoutTag = scriptEntry.getElement("timeout");
         String label = scriptEntry.hasObject("label") ? scriptEntry.getElement("label").asString() : null;
+
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = com.egor201.datenizen.util.SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_table_update");
+                return;
+            }
+        }
+        final long finalTimeout = timeoutMs;
 
         if (!SAFE_NAME.matcher(table).matches()) {
             Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
@@ -129,26 +125,26 @@ public class DbTableUpdateCommand extends AbstractCommand {
         String sql = "UPDATE " + table + " SET " + setPart + " WHERE " + wherePart;
 
         Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
+            long start = System.nanoTime();
+            com.egor201.datenizen.database.DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
+            try (Connection conn = manager.getConnection(id);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
 
+                DbCommandSupport.applySettings(ps, finalTimeout);
                 int idx = 1;
                 for (Pair p : setPairs) ps.setObject(idx++, p.val());
                 for (Pair p : wherePairs) ps.setObject(idx++, p.val());
 
                 int affected = ps.executeUpdate();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbExecutedEvent.instance.fireFor(id, label, affected)
-                );
-            } catch (java.sql.SQLException e) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
-                );
+                manager.afterWrite(id);
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, true, sql);
+                DbCommandSupport.executed(id, label, affected, null, duration);
             } catch (Exception e) {
-                e.printStackTrace();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, sql)
-                );
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, false, sql);
+                manager.recordError(id, e, sql);
+                DbCommandSupport.error(id, e, sql);
             }
         });
     }

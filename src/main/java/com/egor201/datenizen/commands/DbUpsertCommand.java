@@ -1,66 +1,53 @@
 package com.egor201.datenizen.commands;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
-import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
-import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.egor201.datenizen.Datenizen;
-import com.egor201.datenizen.events.DbErrorEvent;
-import com.egor201.datenizen.events.DbExecutedEvent;
-import org.bukkit.Bukkit;
+import com.egor201.datenizen.database.DatabaseManager;
+import com.egor201.datenizen.util.SqlUtils;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
 
-public class DbUpsertCommand extends AbstractCommand {
+public class DbUpsertCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_upsert
-    // @Syntax db_upsert [id:<id>] [table:<table>] [key_column:<col>] [key_value:<val>] [set:<list>] (label:<label>)
+    // @Syntax db_upsert [id:<id>] [table:<table>] [key_column:<col>] [key_value:<val>] [set:<list>] (returning:<column>) (timeout:<ms>) (label:<label>)
     // @Required 5
-    // @Maximum 6
+    // @Maximum 8
     // @Short Insert or update a row without writing SQL manually.
     // @Group Datenizen
     //
     // @Description
-    // The most common game-server pattern: "save this player's data whether they exist or not."
-    // Builds INSERT OR REPLACE (SQLite) or INSERT ... ON DUPLICATE KEY UPDATE (MySQL/MariaDB)
-    // or INSERT ... ON CONFLICT DO UPDATE SET col=EXCLUDED.col (PostgreSQL).
+    // Builds INSERT ... ON CONFLICT DO UPDATE SET col=EXCLUDED.col (SQLite/PostgreSQL)
+    // or INSERT ... ON DUPLICATE KEY UPDATE (MySQL/MariaDB).
     // 'set' is a ListTag of "column=value" pairs. The key column must have a UNIQUE or PRIMARY KEY constraint.
     // Column names must be alphanumeric/underscores only. Values are safely parameterized.
-    // Fires 'db executed' on success with <context.affected_rows>.
+    // 'returning' reads the inserted value back where the database supports it.
+    // Fires 'db executed' on success with <context.affected_rows> and <context.generated_key>.
     //
     // @Usage
     // - db_upsert id:main table:players key_column:uuid key_value:<player.uuid> set:<list[name=<player.name>|coins=0]> label:save_player
     // -->
-
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
-
     public DbUpsertCommand() {
-        setName("db_upsert");
-        setSyntax("db_upsert [id:<id>] [table:<table>] [key_column:<col>] [key_value:<val>] [set:<list>] (label:<label>)");
-        setRequiredArguments(5, 6);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id")         && arg.matchesPrefix("id"))         se.addObject("id",         arg.asElement());
-            else if (!se.hasObject("table")      && arg.matchesPrefix("table"))      se.addObject("table",      arg.asElement());
-            else if (!se.hasObject("key_column") && arg.matchesPrefix("key_column")) se.addObject("key_column", arg.asElement());
-            else if (!se.hasObject("key_value")  && arg.matchesPrefix("key_value"))  se.addObject("key_value",  arg.asElement());
-            else if (!se.hasObject("set")        && arg.matchesPrefix("set"))        se.addObject("set",        arg.asType(ListTag.class));
-            else if (!se.hasObject("label")      && arg.matchesPrefix("label"))      se.addObject("label",      arg.asElement());
-            else arg.reportUnhandled();
-        }
-        if (!se.hasObject("id") || !se.hasObject("table") || !se.hasObject("key_column")
-                || !se.hasObject("key_value") || !se.hasObject("set")) {
-            throw new InvalidArgumentsException("Must specify id, table, key_column, key_value, and set!");
-        }
+        super("db_upsert",
+              "db_upsert [id:<id>] [table:<table>] [key_column:<col>] [key_value:<val>] [set:<list>] (returning:<column>) (timeout:<ms>) (label:<label>)",
+              5, 8,
+              "Must specify id, table, key_column, key_value, and set!",
+              ArgSpec.element("id"),
+              ArgSpec.element("table"),
+              ArgSpec.element("key_column"),
+              ArgSpec.element("key_value"),
+              ArgSpec.list("set"),
+              ArgSpec.optionalElement("returning"),
+              ArgSpec.optionalElement("timeout"),
+              ArgSpec.optionalElement("label"));
     }
 
     private record Pair(String col, String val) {}
@@ -72,12 +59,13 @@ public class DbUpsertCommand extends AbstractCommand {
         String keyCol   = se.getElement("key_column").asString();
         String keyVal   = se.getElement("key_value").asString();
         ListTag setList = se.getObjectTag("set");
+        ElementTag returningTag = se.getElement("returning");
+        ElementTag timeoutTag = se.getElement("timeout");
         String label    = se.hasObject("label") ? se.getElement("label").asString() : null;
 
-        if (!SAFE_NAME.matcher(table).matches() || !SAFE_NAME.matcher(keyCol).matches()) {
-            Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                DbErrorEvent.instance.fireFor(id, "Invalid table or key_column name", null, "db_upsert")
-            );
+        if (!com.egor201.datenizen.util.Identifiers.isValid(table)
+            || !com.egor201.datenizen.util.Identifiers.isValid(keyCol)) {
+            DbCommandSupport.error(id, "Invalid table or key_column name", "db_upsert");
             return;
         }
 
@@ -85,57 +73,95 @@ public class DbUpsertCommand extends AbstractCommand {
         for (String entry : setList) {
             int eq = entry.indexOf('=');
             if (eq < 1) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, "Invalid set entry: " + entry, null, "db_upsert")
-                );
+                DbCommandSupport.error(id, "Invalid set entry: " + entry, "db_upsert");
                 return;
             }
             String col = entry.substring(0, eq).trim();
             String val = entry.substring(eq + 1);
-            if (!SAFE_NAME.matcher(col).matches()) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, "Invalid column name: " + col, null, "db_upsert")
-                );
+            if (!com.egor201.datenizen.util.Identifiers.isValid(col)) {
+                DbCommandSupport.error(id, "Invalid column name: " + col, "db_upsert");
                 return;
             }
             pairs.add(new Pair(col, val));
         }
 
         if (pairs.isEmpty()) {
-            Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                DbErrorEvent.instance.fireFor(id, "set list must not be empty", null, "db_upsert")
-            );
+            DbCommandSupport.error(id, "set list must not be empty", "db_upsert");
             return;
         }
 
-        Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
-            String dbType = Datenizen.getInstance().getDatabaseManager().getDatabaseType(id);
-            String sql = buildSql(dbType, table, keyCol, pairs);
+        String returning = returningTag != null && !returningTag.asString().isBlank()
+            ? returningTag.asString()
+            : null;
+        if (returning != null && !com.egor201.datenizen.util.Identifiers.isValid(returning)) {
+            DbCommandSupport.error(id, "Invalid returning column: " + returning, "db_upsert");
+            return;
+        }
 
-            try (Connection conn = Datenizen.getInstance().getDatabaseManager().getConnection(id);
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
+        long timeoutMs = -1;
+        if (timeoutTag != null) {
+            timeoutMs = SqlUtils.parseDurationMillis(timeoutTag.asString());
+            if (timeoutMs < 0) {
+                DbCommandSupport.error(id, "Invalid timeout: " + timeoutTag.asString(), "db_upsert");
+                return;
+            }
+        }
+        final long finalTimeout = timeoutMs;
 
-                int idx = 1;
-                ps.setObject(idx++, keyVal);
-                for (Pair p : pairs) ps.setObject(idx++, p.val());
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(Datenizen.getInstance(), () -> {
+            DatabaseManager manager = Datenizen.getInstance().getDatabaseManager();
+            String dbType = manager.getDatabaseType(id);
+            String baseSql = buildSql(dbType, table, keyCol, pairs);
+            boolean useReturningClause = returning != null
+                && (dbType.equals("sqlite") || dbType.equals("postgresql"));
+            String sql = useReturningClause ? baseSql + " RETURNING " + returning : baseSql;
 
-                if (dbType.equals("mysql") || dbType.equals("mariadb")) {
+            long start = System.nanoTime();
+            try (Connection conn = manager.getConnection(id)) {
+                PreparedStatement ps = useReturningClause
+                    ? conn.prepareStatement(sql)
+                    : conn.prepareStatement(sql, returning != null ? Statement.RETURN_GENERATED_KEYS : Statement.NO_GENERATED_KEYS);
+
+                try {
+                    DbCommandSupport.applySettings(ps, finalTimeout);
+
+                    int idx = 1;
+                    ps.setObject(idx++, keyVal);
                     for (Pair p : pairs) ps.setObject(idx++, p.val());
-                }
+                    if (dbType.equals("mysql") || dbType.equals("mariadb")) {
+                        for (Pair p : pairs) ps.setObject(idx++, p.val());
+                    }
+                    DbCommandSupport.log(sql);
 
-                int affected = ps.executeUpdate();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbExecutedEvent.instance.fireFor(id, label, affected)
-                );
-            } catch (java.sql.SQLException e) {
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), e.getSQLState(), sql)
-                );
+                    int affected;
+                    String generatedKey = null;
+
+                    if (useReturningClause) {
+                        try (ResultSet rs = ps.executeQuery()) {
+                            affected = rs.next() ? 1 : 0;
+                            if (affected > 0) generatedKey = rs.getString(1);
+                        }
+                    } else {
+                        affected = ps.executeUpdate();
+                        if (returning != null) {
+                            try (ResultSet keys = ps.getGeneratedKeys()) {
+                                if (keys.next()) generatedKey = keys.getString(1);
+                            }
+                        }
+                    }
+
+                    manager.afterWrite(id);
+                    long duration = DbCommandSupport.elapsedMs(start);
+                    manager.recordQuery(id, duration, true, sql);
+                    DbCommandSupport.executed(id, label, affected, generatedKey, duration);
+                } finally {
+                    try { ps.close(); } catch (Exception ignored) {}
+                }
             } catch (Exception e) {
-                e.printStackTrace();
-                Bukkit.getScheduler().runTask(Datenizen.getInstance(), () ->
-                    DbErrorEvent.instance.fireFor(id, e.getMessage(), null, sql)
-                );
+                long duration = DbCommandSupport.elapsedMs(start);
+                manager.recordQuery(id, duration, false, sql);
+                manager.recordError(id, e, sql);
+                DbCommandSupport.error(id, e, sql);
             }
         });
     }
@@ -150,7 +176,7 @@ public class DbUpsertCommand extends AbstractCommand {
             placeholders.append(",?");
             if (i > 0) updatePart.append(",");
             updatePart.append(pairs.get(i).col());
-            if (dbType.equals("postgresql")) {
+            if (dbType.equals("postgresql") || dbType.equals("sqlite")) {
                 updatePart.append("=EXCLUDED.").append(pairs.get(i).col());
             } else {
                 updatePart.append("=?");
@@ -158,9 +184,7 @@ public class DbUpsertCommand extends AbstractCommand {
         }
 
         return switch (dbType) {
-            case "sqlite" ->
-                "INSERT OR REPLACE INTO " + table + " (" + cols + ") VALUES (" + placeholders + ")";
-            case "postgresql" ->
+            case "sqlite", "postgresql" ->
                 "INSERT INTO " + table + " (" + cols + ") VALUES (" + placeholders + ")" +
                 " ON CONFLICT (" + keyCol + ") DO UPDATE SET " + updatePart;
             default ->

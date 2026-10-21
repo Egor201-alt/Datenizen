@@ -13,7 +13,7 @@ import org.bukkit.Bukkit;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 
-public class DbExecuteAsyncListCommand extends AbstractCommand {
+public class DbExecuteAsyncListCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_execute_async_list
@@ -31,27 +31,13 @@ public class DbExecuteAsyncListCommand extends AbstractCommand {
     // -->
 
     public DbExecuteAsyncListCommand() {
-        setName("db_execute_async_list");
-        setSyntax("db_execute_async_list [id:<id>] [sql:<list>] (label:<label>)");
-        setRequiredArguments(2, 3);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("sql") && arg.matchesPrefix("sql")) {
-                scriptEntry.addObject("sql", arg.asType(ListTag.class));
-            } else if (!scriptEntry.hasObject("label") && arg.matchesPrefix("label")) {
-                scriptEntry.addObject("label", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("sql")) {
-            throw new InvalidArgumentsException("Must specify id and sql!");
-        }
+        super("db_execute_async_list",
+              "db_execute_async_list [id:<id>] [sql:<list>] (label:<label>)",
+              2, 3,
+              "Must specify id and sql!",
+              ArgSpec.element("id"),
+              ArgSpec.list("sql"),
+              ArgSpec.optionalElement("label"));
     }
 
     @Override

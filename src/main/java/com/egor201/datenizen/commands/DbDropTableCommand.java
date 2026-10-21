@@ -12,7 +12,7 @@ import org.bukkit.Bukkit;
 import java.sql.Connection;
 import java.sql.Statement;
 
-public class DbDropTableCommand extends AbstractCommand {
+public class DbDropTableCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_drop_table
@@ -27,28 +27,12 @@ public class DbDropTableCommand extends AbstractCommand {
     // Table name must contain only alphanumeric characters and underscores.
     // -->
 
-    private static final java.util.regex.Pattern SAFE_NAME = java.util.regex.Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final java.util.regex.Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbDropTableCommand() {
-        setName("db_drop_table");
-        setSyntax("db_drop_table [id:<id>] [table:<table>]");
-        setRequiredArguments(2, 2);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("id") && arg.matchesPrefix("id")) {
-                scriptEntry.addObject("id", arg.asElement());
-            } else if (!scriptEntry.hasObject("table") && arg.matchesPrefix("table")) {
-                scriptEntry.addObject("table", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("id") || !scriptEntry.hasObject("table")) {
-            throw new InvalidArgumentsException("Must specify id and table!");
-        }
+        super("db_drop_table", "db_drop_table [id:<id>] [table:<table>]", 2, 2,
+              "Must specify id and table!",
+              ArgSpec.element("id"), ArgSpec.element("table"));
     }
 
     @Override

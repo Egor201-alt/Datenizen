@@ -1,7 +1,10 @@
 package com.egor201.datenizen.database;
 
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.egor201.datenizen.Datenizen;
+import com.egor201.datenizen.Settings;
 import com.egor201.datenizen.events.DbConnectionLeakedEvent;
 import com.egor201.datenizen.events.DbDisconnectedEvent;
 import com.egor201.datenizen.events.DbNotifyEvent;
@@ -20,9 +23,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class DatabaseManager {
 
-    private record ConnectionParams(String driver, String url, String user, String password) {}
+    private record ConnectionParams(String driver, String url, String user, String password,
+                                    boolean readOnly, String initSql, Map<String, String> jdbcParams,
+                                    int poolMax, int poolMin, long connectionTimeoutMs) {}
 
     private final Map<String, HikariDataSource>  connectionPools       = new ConcurrentHashMap<>();
+    private final Map<String, DbStats>           stats                 = new ConcurrentHashMap<>();
     private final Map<String, Connection>        activeTransactions    = new ConcurrentHashMap<>();
     private final Map<String, Long>              transactionStartTimes = new ConcurrentHashMap<>();
     private final Map<String, String>            transactionDbIds      = new ConcurrentHashMap<>();
@@ -69,7 +75,9 @@ public class DatabaseManager {
 
     public static String resolveDriver(String input) {
         if (input == null) return null;
-        return DRIVER_ALIASES.get(input.toLowerCase());
+        String alias = DRIVER_ALIASES.get(input.toLowerCase());
+        if (alias != null) return alias;
+        return ALLOWED_DRIVERS.contains(input) ? input : null;
     }
 
     public static String resolveUrl(String driver, String rawUrl) {
@@ -84,7 +92,53 @@ public class DatabaseManager {
         };
     }
 
+    private static HikariConfig buildConfig(String id, String driver, String url, String user, String password,
+                                            boolean readOnly, String initSql, Map<String, String> jdbcParams,
+                                            int poolMax, int poolMin, long connectionTimeoutMs) {
+        HikariConfig config = new HikariConfig();
+        config.setDriverClassName(driver);
+        config.setJdbcUrl(url);
+        if (user != null && !user.isEmpty())         config.setUsername(user);
+        if (password != null && !password.isEmpty()) config.setPassword(password);
+
+        int max = poolMax > 0 ? poolMax : Settings.poolMax;
+        int min = poolMin >= 0 ? poolMin : Settings.poolMin;
+        config.setMaximumPoolSize(Math.max(1, max));
+        config.setMinimumIdle(Math.max(0, Math.min(max, min)));
+        config.setConnectionTimeout(Math.max(1_000L, connectionTimeoutMs));
+        config.setIdleTimeout(600_000L);
+        config.setPoolName("Datenizen-" + id);
+
+        if (readOnly) {
+            if ("org.sqlite.JDBC".equals(driver)) {
+                // SQLite's JDBC driver cannot toggle read-only after connecting, so
+                // request read-only mode through the driver's open_mode property.
+                config.addDataSourceProperty("open_mode", "1");
+            } else {
+                config.setReadOnly(true);
+            }
+        }
+        if (initSql != null && !initSql.isBlank()) {
+            config.setConnectionInitSql(initSql);
+        }
+        if (jdbcParams != null) {
+            for (Map.Entry<String, String> entry : jdbcParams.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null) {
+                    config.addDataSourceProperty(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+        return config;
+    }
+
     public boolean connect(String id, String driver, String url, String user, String password) {
+        return connect(id, driver, url, user, password, false, null, Map.of(),
+            Settings.poolMax, Settings.poolMin, Settings.connectionTimeoutMs);
+    }
+
+    public boolean connect(String id, String driver, String url, String user, String password,
+                           boolean readOnly, String initSql, Map<String, String> jdbcParams,
+                           int poolMax, int poolMin, long connectionTimeoutMs) {
         if (connectionPools.containsKey(id)) return false;
 
         if (!ALLOWED_DRIVERS.contains(driver)) {
@@ -92,21 +146,24 @@ public class DatabaseManager {
             return false;
         }
 
-        HikariConfig config = new HikariConfig();
-        config.setDriverClassName(driver);
-        config.setJdbcUrl(url);
-        if (user != null && !user.isEmpty())         config.setUsername(user);
-        if (password != null && !password.isEmpty()) config.setPassword(password);
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        config.setConnectionTimeout(10000);
-        config.setIdleTimeout(600000);
-        config.setPoolName("Datenizen-" + id);
+        HikariConfig config = buildConfig(id, driver, url, user, password, readOnly, initSql,
+            jdbcParams, poolMax, poolMin, connectionTimeoutMs);
 
         try {
             HikariDataSource ds = new HikariDataSource(config);
             connectionPools.put(id, ds);
-            savedParams.put(id, new ConnectionParams(driver, url, user != null ? user : "", password != null ? password : ""));
+            savedParams.put(id, new ConnectionParams(
+                driver,
+                url,
+                user != null ? user : "",
+                password != null ? password : "",
+                readOnly,
+                initSql,
+                jdbcParams != null ? new HashMap<>(jdbcParams) : Map.of(),
+                poolMax,
+                poolMin,
+                connectionTimeoutMs
+            ));
             return true;
         } catch (Exception e) {
             Bukkit.getLogger().severe("[Datenizen] Failed to connect to database '" + id + "': " + e.getMessage());
@@ -121,16 +178,9 @@ public class DatabaseManager {
         HikariDataSource old = connectionPools.remove(id);
         if (old != null && !old.isClosed()) old.close();
 
-        HikariConfig config = new HikariConfig();
-        config.setDriverClassName(params.driver());
-        config.setJdbcUrl(params.url());
-        if (!params.user().isEmpty())     config.setUsername(params.user());
-        if (!params.password().isEmpty()) config.setPassword(params.password());
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        config.setConnectionTimeout(10000);
-        config.setIdleTimeout(600000);
-        config.setPoolName("Datenizen-" + id);
+        HikariConfig config = buildConfig(id, params.driver(), params.url(), params.user(), params.password(),
+            params.readOnly(), params.initSql(), params.jdbcParams(),
+            params.poolMax(), params.poolMin(), params.connectionTimeoutMs());
 
         try {
             HikariDataSource ds = new HikariDataSource(config);
@@ -165,6 +215,44 @@ public class DatabaseManager {
         queryCache.keySet().removeIf(k -> k.startsWith(id + ":"));
     }
 
+    /** Called after successful writes so cached reads never return stale data. */
+    public void afterWrite(String id) {
+        if (Settings.cacheInvalidateOnWrite) {
+            invalidateCache(id);
+        }
+    }
+
+    public DbStats getStats(String id) {
+        return stats.get(id);
+    }
+
+    public DbStats statsFor(String id) {
+        return stats.computeIfAbsent(id, DbStats::new);
+    }
+
+    public void recordQuery(String id, long durationMs, boolean success, String sql) {
+        statsFor(id).recordQuery(durationMs, success, sql, Settings.slowQueryMs);
+    }
+
+    public void recordError(String id, Throwable error, String sql) {
+        statsFor(id).recordError(error, sql);
+    }
+
+    /** Returns active transactions as a ListTag of MapTags. */
+    public ListTag getTransactions() {
+        ListTag list = new ListTag();
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Connection> entry : activeTransactions.entrySet()) {
+            String txId = entry.getKey();
+            MapTag map = new MapTag();
+            map.putObject("tx_id", new ElementTag(txId));
+            map.putObject("db_id", new ElementTag(transactionDbIds.getOrDefault(txId, "")));
+            map.putObject("age_ms", new ElementTag(now - transactionStartTimes.getOrDefault(txId, now)));
+            list.addObject(map);
+        }
+        return list;
+    }
+
     public boolean disconnect(String id) {
         List<String> txToRollback = new ArrayList<>();
         for (Map.Entry<String, String> entry : transactionDbIds.entrySet()) {
@@ -177,6 +265,7 @@ public class DatabaseManager {
         invalidateCache(id);
         namedQueries.keySet().removeIf(k -> k.startsWith(id + ":"));
         savedParams.remove(id);
+        stats.remove(id);
         HikariDataSource ds = connectionPools.remove(id);
         if (ds != null) {
             if (!ds.isClosed()) ds.close();
@@ -349,6 +438,7 @@ public class DatabaseManager {
         savedParams.clear();
         namedQueries.clear();
         queryCache.clear();
+        stats.clear();
 
         for (HikariDataSource ds : connectionPools.values()) {
             if (ds != null && !ds.isClosed()) ds.close();

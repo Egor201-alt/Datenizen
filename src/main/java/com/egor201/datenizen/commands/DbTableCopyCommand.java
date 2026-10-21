@@ -14,7 +14,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-public class DbTableCopyCommand extends AbstractCommand {
+public class DbTableCopyCommand extends AbstractDbCommand {
 
     // <--[command]
     // @Name db_table_copy
@@ -35,32 +35,17 @@ public class DbTableCopyCommand extends AbstractCommand {
     // - db_table_copy id:main from:players to:players_archive insert_only:true
     // -->
 
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9_]+$");
+    private static final Pattern SAFE_NAME = com.egor201.datenizen.util.Identifiers.PATTERN;
 
     public DbTableCopyCommand() {
-        setName("db_table_copy");
-        setSyntax("db_table_copy [id:<id>] [from:<table>] [to:<table>] (insert_only:true/false)");
-        setRequiredArguments(3, 4);
-    }
-
-    @Override
-    public void parseArgs(ScriptEntry se) throws InvalidArgumentsException {
-        for (Argument arg : se) {
-            if (!se.hasObject("id") && arg.matchesPrefix("id")) {
-                se.addObject("id", arg.asElement());
-            } else if (!se.hasObject("from") && arg.matchesPrefix("from")) {
-                se.addObject("from", arg.asElement());
-            } else if (!se.hasObject("to") && arg.matchesPrefix("to")) {
-                se.addObject("to", arg.asElement());
-            } else if (!se.hasObject("insert_only") && arg.matchesPrefix("insert_only")) {
-                se.addObject("insert_only", arg.asElement());
-            } else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!se.hasObject("id") || !se.hasObject("from") || !se.hasObject("to")) {
-            throw new InvalidArgumentsException("Must specify id, from, and to!");
-        }
+        super("db_table_copy",
+              "db_table_copy [id:<id>] [from:<table>] [to:<table>] (insert_only:true/false)",
+              3, 4,
+              "Must specify id, from, and to!",
+              ArgSpec.element("id"),
+              ArgSpec.element("from"),
+              ArgSpec.element("to"),
+              ArgSpec.optionalElement("insert_only"));
     }
 
     @Override
