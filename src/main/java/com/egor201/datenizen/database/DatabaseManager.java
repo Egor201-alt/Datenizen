@@ -83,13 +83,16 @@ public class DatabaseManager {
     public static String resolveUrl(String driver, String rawUrl) {
         if (rawUrl == null) return null;
         if (rawUrl.startsWith("jdbc:")) return rawUrl;
-        return switch (driver) {
-            case "org.sqlite.JDBC"          -> "jdbc:sqlite:" + rawUrl;
-            case "com.mysql.cj.jdbc.Driver" -> "jdbc:mysql://" + rawUrl;
-            case "org.mariadb.jdbc.Driver"  -> "jdbc:mariadb://" + rawUrl;
-            case "org.postgresql.Driver"    -> "jdbc:postgresql://" + rawUrl;
-            default -> rawUrl;
-        };
+        if (driver == null) return rawUrl;
+
+        // Do not use a String switch here: Shadow relocates the driver class names,
+        // but a compiled String switch keeps the original hash codes, so after
+        // relocation it would silently fall through to the default branch.
+        if (driver.contains("sqlite"))     return "jdbc:sqlite:" + rawUrl;
+        if (driver.contains("mariadb"))    return "jdbc:mariadb://" + rawUrl;
+        if (driver.contains("mysql"))      return "jdbc:mysql://" + rawUrl;
+        if (driver.contains("postgresql")) return "jdbc:postgresql://" + rawUrl;
+        return rawUrl;
     }
 
     private static HikariConfig buildConfig(String id, String driver, String url, String user, String password,

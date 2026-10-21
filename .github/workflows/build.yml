@@ -2,9 +2,10 @@ name: Build Datenizen
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "release/**" ]
   pull_request:
     branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
